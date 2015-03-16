@@ -28,7 +28,7 @@
 #include <linux/io.h>
 #include <linux/aio.h>
 
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 
 #ifdef CONFIG_IA64
 # include <linux/efi.h>
@@ -84,9 +84,12 @@ static inline int range_is_allowed(unsigned long pfn, unsigned long size)
 }
 #endif
 
-void __weak unxlate_dev_mem_ptr(unsigned long phys, void *addr)
+#ifndef unxlate_dev_mem_ptr
+#define unxlate_dev_mem_ptr unxlate_dev_mem_ptr
+void __weak unxlate_dev_mem_ptr(phys_addr_t phys, void *addr)
 {
 }
+#endif
 
 /*
  * This funcion reads the *physical* memory. The f_pos points directly to the
@@ -97,7 +100,7 @@ static ssize_t read_mem(struct file *file, char __user *buf,
 {
 	phys_addr_t p = *ppos;
 	ssize_t read, sz;
-	char *ptr;
+	void *ptr;
 
 	if (p != *ppos)
 		return 0;
@@ -284,13 +287,24 @@ static unsigned long get_unmapped_area_mem(struct file *file,
 	return pgoff << PAGE_SHIFT;
 }
 
+/* permit direct mmap, for read, write or exec */
+static unsigned memory_mmap_capabilities(struct file *file)
+{
+	return NOMMU_MAP_DIRECT |
+		NOMMU_MAP_READ | NOMMU_MAP_WRITE | NOMMU_MAP_EXEC;
+}
+
+static unsigned zero_mmap_capabilities(struct file *file)
+{
+	return NOMMU_MAP_COPY;
+}
+
 /* can't do an in-place private mapping if there's no MMU */
 static inline int private_mapping_ok(struct vm_area_struct *vma)
 {
 	return vma->vm_flags & VM_MAYSHARE;
 }
 #else
-#define get_unmapped_area_mem	NULL
 
 static inline int private_mapping_ok(struct vm_area_struct *vma)
 {
@@ -338,7 +352,6 @@ static int mmap_mem(struct file *file, struct vm_area_struct *vma)
 	return 0;
 }
 
-#ifdef CONFIG_DEVKMEM
 static int mmap_kmem(struct file *file, struct vm_area_struct *vma)
 {
 	unsigned long pfn;
@@ -359,9 +372,7 @@ static int mmap_kmem(struct file *file, struct vm_area_struct *vma)
 	vma->vm_pgoff = pfn;
 	return mmap_mem(file, vma);
 }
-#endif
 
-#ifdef CONFIG_DEVKMEM
 /*
  * This function reads the *virtual* memory as seen by the kernel.
  */
@@ -400,7 +411,7 @@ static ssize_t read_kmem(struct file *file, char __user *buf,
 			 * uncached, then it must also be accessed uncached
 			 * by the kernel or data corruption may occur
 			 */
-			kbuf = xlate_dev_kmem_ptr((char *)p);
+			kbuf = xlate_dev_kmem_ptr((void *)p);
 
 			if (copy_to_user(buf, kbuf, sz))
 				return -EFAULT;
@@ -461,7 +472,7 @@ static ssize_t do_write_kmem(unsigned long p, const char __user *buf,
 #endif
 
 	while (count > 0) {
-		char *ptr;
+		void *ptr;
 
 		sz = size_inside_page(p, count);
 
@@ -470,7 +481,7 @@ static ssize_t do_write_kmem(unsigned long p, const char __user *buf,
 		 * it must also be accessed uncached by the kernel or data
 		 * corruption may occur.
 		 */
-		ptr = xlate_dev_kmem_ptr((char *)p);
+		ptr = xlate_dev_kmem_ptr((void *)p);
 
 		copied = copy_from_user(ptr, buf, sz);
 		if (copied) {
@@ -541,9 +552,7 @@ static ssize_t write_kmem(struct file *file, const char __user *buf,
 	*ppos = p;
 	return virtr + wrote ? : err;
 }
-#endif
 
-#ifdef CONFIG_DEVPORT
 static ssize_t read_port(struct file *file, char __user *buf,
 			 size_t count, loff_t *ppos)
 {
@@ -572,6 +581,7 @@ static ssize_t write_port(struct file *file, const char __user *buf,
 		return -EFAULT;
 	while (count-- > 0 && i < 65536) {
 		char c;
+
 		if (__get_user(c, tmp)) {
 			if (tmp > buf)
 				break;
@@ -584,7 +594,6 @@ static ssize_t write_port(struct file *file, const char __user *buf,
 	*ppos = i;
 	return tmp-buf;
 }
-#endif
 
 static ssize_t read_null(struct file *file, char __user *buf,
 			 size_t count, loff_t *ppos)
@@ -628,6 +637,7 @@ static ssize_t read_iter_zero(struct kiocb *iocb, struct iov_iter *iter)
 
 	while (iov_iter_count(iter)) {
 		size_t chunk = iov_iter_count(iter), n;
+
 		if (chunk > PAGE_SIZE)
 			chunk = PAGE_SIZE;	/* Just for latency reasons */
 		n = iov_iter_zero(chunk, iter);
@@ -712,25 +722,29 @@ static int open_port(struct inode *inode, struct file *filp)
 #define open_mem	open_port
 #define open_kmem	open_mem
 
-static const struct file_operations mem_fops = {
+static const struct file_operations __maybe_unused mem_fops = {
 	.llseek		= memory_lseek,
 	.read		= read_mem,
 	.write		= write_mem,
 	.mmap		= mmap_mem,
 	.open		= open_mem,
+#ifndef CONFIG_MMU
 	.get_unmapped_area = get_unmapped_area_mem,
+	.mmap_capabilities = memory_mmap_capabilities,
+#endif
 };
 
-#ifdef CONFIG_DEVKMEM
-static const struct file_operations kmem_fops = {
+static const struct file_operations __maybe_unused kmem_fops = {
 	.llseek		= memory_lseek,
 	.read		= read_kmem,
 	.write		= write_kmem,
 	.mmap		= mmap_kmem,
 	.open		= open_kmem,
+#ifndef CONFIG_MMU
 	.get_unmapped_area = get_unmapped_area_mem,
-};
+	.mmap_capabilities = memory_mmap_capabilities,
 #endif
+};
 
 static const struct file_operations null_fops = {
 	.llseek		= null_lseek,
@@ -741,14 +755,12 @@ static const struct file_operations null_fops = {
 	.splice_write	= splice_write_null,
 };
 
-#ifdef CONFIG_DEVPORT
-static const struct file_operations port_fops = {
+static const struct file_operations __maybe_unused port_fops = {
 	.llseek		= memory_lseek,
 	.read		= read_port,
 	.write		= write_port,
 	.open		= open_port,
 };
-#endif
 
 static const struct file_operations zero_fops = {
 	.llseek		= zero_lseek,
@@ -757,16 +769,9 @@ static const struct file_operations zero_fops = {
 	.read_iter	= read_iter_zero,
 	.aio_write	= aio_write_zero,
 	.mmap		= mmap_zero,
-};
-
-/*
- * capabilities for /dev/zero
- * - permits private mappings, "copies" are taken of the source of zeros
- * - no writeback happens
- */
-static struct backing_dev_info zero_bdi = {
-	.name		= "char/mem",
-	.capabilities	= BDI_CAP_MAP_COPY | BDI_CAP_NO_ACCT_AND_WRITEBACK,
+#ifndef CONFIG_MMU
+	.mmap_capabilities = zero_mmap_capabilities,
+#endif
 };
 
 static const struct file_operations full_fops = {
@@ -780,22 +785,24 @@ static const struct memdev {
 	const char *name;
 	umode_t mode;
 	const struct file_operations *fops;
-	struct backing_dev_info *dev_info;
+	fmode_t fmode;
 } devlist[] = {
-	 [1] = { "mem", 0, &mem_fops, &directly_mappable_cdev_bdi },
+#ifdef CONFIG_DEVMEM
+	 [1] = { "mem", 0, &mem_fops, FMODE_UNSIGNED_OFFSET },
+#endif
 #ifdef CONFIG_DEVKMEM
-	 [2] = { "kmem", 0, &kmem_fops, &directly_mappable_cdev_bdi },
+	 [2] = { "kmem", 0, &kmem_fops, FMODE_UNSIGNED_OFFSET },
 #endif
-	 [3] = { "null", 0666, &null_fops, NULL },
+	 [3] = { "null", 0666, &null_fops, 0 },
 #ifdef CONFIG_DEVPORT
-	 [4] = { "port", 0, &port_fops, NULL },
+	 [4] = { "port", 0, &port_fops, 0 },
 #endif
-	 [5] = { "zero", 0666, &zero_fops, &zero_bdi },
-	 [7] = { "full", 0666, &full_fops, NULL },
-	 [8] = { "random", 0666, &random_fops, NULL },
-	 [9] = { "urandom", 0666, &urandom_fops, NULL },
+	 [5] = { "zero", 0666, &zero_fops, 0 },
+	 [7] = { "full", 0666, &full_fops, 0 },
+	 [8] = { "random", 0666, &random_fops, 0 },
+	 [9] = { "urandom", 0666, &urandom_fops, 0 },
 #ifdef CONFIG_PRINTK
-	[11] = { "kmsg", 0644, &kmsg_fops, NULL },
+	[11] = { "kmsg", 0644, &kmsg_fops, 0 },
 #endif
 };
 
@@ -813,12 +820,7 @@ static int memory_open(struct inode *inode, struct file *filp)
 		return -ENXIO;
 
 	filp->f_op = dev->fops;
-	if (dev->dev_info)
-		filp->f_mapping->backing_dev_info = dev->dev_info;
-
-	/* Is /dev/mem or /dev/kmem ? */
-	if (dev->dev_info == &directly_mappable_cdev_bdi)
-		filp->f_mode |= FMODE_UNSIGNED_OFFSET;
+	filp->f_mode |= dev->fmode;
 
 	if (dev->fops->open)
 		return dev->fops->open(inode, filp);
@@ -843,11 +845,6 @@ static struct class *mem_class;
 static int __init chr_dev_init(void)
 {
 	int minor;
-	int err;
-
-	err = bdi_init(&zero_bdi);
-	if (err)
-		return err;
 
 	if (register_chrdev(MEM_MAJOR, "mem", &memory_fops))
 		printk("unable to get major %d for memory devs\n", MEM_MAJOR);

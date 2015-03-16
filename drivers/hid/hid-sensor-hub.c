@@ -135,8 +135,9 @@ static struct hid_sensor_hub_callbacks *sensor_hub_get_callback(
 {
 	struct hid_sensor_hub_callbacks_list *callback;
 	struct sensor_hub_data *pdata = hid_get_drvdata(hdev);
+	unsigned long flags;
 
-	spin_lock(&pdata->dyn_callback_lock);
+	spin_lock_irqsave(&pdata->dyn_callback_lock, flags);
 	list_for_each_entry(callback, &pdata->dyn_callback_list, list)
 		if (callback->usage_id == usage_id &&
 			(collection_index >=
@@ -145,10 +146,11 @@ static struct hid_sensor_hub_callbacks *sensor_hub_get_callback(
 				callback->hsdev->end_collection_index)) {
 			*priv = callback->priv;
 			*hsdev = callback->hsdev;
-			spin_unlock(&pdata->dyn_callback_lock);
+			spin_unlock_irqrestore(&pdata->dyn_callback_lock,
+					       flags);
 			return callback->usage_callback;
 		}
-	spin_unlock(&pdata->dyn_callback_lock);
+	spin_unlock_irqrestore(&pdata->dyn_callback_lock, flags);
 
 	return NULL;
 }
@@ -641,9 +643,6 @@ static int sensor_hub_probe(struct hid_device *hdev,
 					goto err_stop_hw;
 			}
 			sd->hid_sensor_hub_client_devs[
-				sd->hid_sensor_client_cnt].id =
-							PLATFORM_DEVID_AUTO;
-			sd->hid_sensor_hub_client_devs[
 				sd->hid_sensor_client_cnt].name = name;
 			sd->hid_sensor_hub_client_devs[
 				sd->hid_sensor_client_cnt].platform_data =
@@ -659,8 +658,9 @@ static int sensor_hub_probe(struct hid_device *hdev,
 	if (last_hsdev)
 		last_hsdev->end_collection_index = i;
 
-	ret = mfd_add_devices(&hdev->dev, 0, sd->hid_sensor_hub_client_devs,
-		sd->hid_sensor_client_cnt, NULL, 0, NULL);
+	ret = mfd_add_hotplug_devices(&hdev->dev,
+			sd->hid_sensor_hub_client_devs,
+			sd->hid_sensor_client_cnt);
 	if (ret < 0)
 		goto err_stop_hw;
 

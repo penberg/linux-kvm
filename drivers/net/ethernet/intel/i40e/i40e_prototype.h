@@ -71,6 +71,9 @@ i40e_status i40e_aq_get_firmware_version(struct i40e_hw *hw,
 i40e_status i40e_aq_debug_write_register(struct i40e_hw *hw,
 					u32 reg_addr, u64 reg_val,
 					struct i40e_asq_cmd_details *cmd_details);
+i40e_status i40e_aq_debug_read_register(struct i40e_hw *hw,
+				u32  reg_addr, u64 *reg_val,
+				struct i40e_asq_cmd_details *cmd_details);
 i40e_status i40e_aq_set_phy_debug(struct i40e_hw *hw, u8 cmd_flags,
 				struct i40e_asq_cmd_details *cmd_details);
 i40e_status i40e_aq_set_default_vsi(struct i40e_hw *hw, u16 vsi_id,
@@ -84,6 +87,8 @@ enum i40e_status_code i40e_aq_set_phy_config(struct i40e_hw *hw,
 				struct i40e_asq_cmd_details *cmd_details);
 enum i40e_status_code i40e_set_fc(struct i40e_hw *hw, u8 *aq_failures,
 				  bool atomic_reset);
+i40e_status i40e_aq_set_phy_int_mask(struct i40e_hw *hw, u16 mask,
+				     struct i40e_asq_cmd_details *cmd_details);
 i40e_status i40e_aq_clear_pxe_mode(struct i40e_hw *hw,
 				struct i40e_asq_cmd_details *cmd_details);
 i40e_status i40e_aq_set_link_restart_an(struct i40e_hw *hw,
@@ -173,6 +178,9 @@ i40e_status i40e_aq_stop_lldp(struct i40e_hw *hw, bool shutdown_agent,
 				struct i40e_asq_cmd_details *cmd_details);
 i40e_status i40e_aq_start_lldp(struct i40e_hw *hw,
 				struct i40e_asq_cmd_details *cmd_details);
+i40e_status i40e_aq_get_cee_dcb_config(struct i40e_hw *hw,
+				       void *buff, u16 buff_size,
+				       struct i40e_asq_cmd_details *cmd_details);
 i40e_status i40e_aq_add_udp_tunnel(struct i40e_hw *hw,
 				u16 udp_port, u8 protocol_index,
 				u8 *filter_index,
@@ -228,6 +236,10 @@ i40e_status i40e_aq_query_switch_comp_bw_config(struct i40e_hw *hw,
 		u16 seid,
 		struct i40e_aqc_query_switching_comp_bw_config_resp *bw_data,
 		struct i40e_asq_cmd_details *cmd_details);
+i40e_status i40e_aq_resume_port_tx(struct i40e_hw *hw,
+				   struct i40e_asq_cmd_details *cmd_details);
+i40e_status i40e_read_lldp_cfg(struct i40e_hw *hw,
+			       struct i40e_lldp_variables *lldp_cfg);
 /* i40e_common */
 i40e_status i40e_init_shared_code(struct i40e_hw *hw);
 i40e_status i40e_pf_reset(struct i40e_hw *hw);
@@ -236,6 +248,8 @@ void i40e_clear_pxe_mode(struct i40e_hw *hw);
 bool i40e_get_link_status(struct i40e_hw *hw);
 i40e_status i40e_get_mac_addr(struct i40e_hw *hw, u8 *mac_addr);
 i40e_status i40e_get_port_mac_addr(struct i40e_hw *hw, u8 *mac_addr);
+i40e_status i40e_read_pba_string(struct i40e_hw *hw, u8 *pba_num,
+				 u32 pba_num_size);
 i40e_status i40e_validate_mac_addr(u8 *mac_addr);
 void i40e_pre_tx_queue_cfg(struct i40e_hw *hw, u32 queue, bool enable);
 #ifdef I40E_FCOE

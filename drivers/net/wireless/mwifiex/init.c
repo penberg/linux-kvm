@@ -52,6 +52,18 @@ static int mwifiex_add_bss_prio_tbl(struct mwifiex_private *priv)
 	return 0;
 }
 
+static void wakeup_timer_fn(unsigned long data)
+{
+	struct mwifiex_adapter *adapter = (struct mwifiex_adapter *)data;
+
+	dev_err(adapter->dev, "Firmware wakeup failed\n");
+	adapter->hw_status = MWIFIEX_HW_STATUS_RESET;
+	mwifiex_cancel_all_pending_cmd(adapter);
+
+	if (adapter->if_ops.card_reset)
+		adapter->if_ops.card_reset(adapter);
+}
+
 /*
  * This function initializes the private structure and sets default
  * values to the members.
@@ -137,7 +149,10 @@ int mwifiex_init_priv(struct mwifiex_private *priv)
 	priv->csa_expire_time = 0;
 	priv->del_list_idx = 0;
 	priv->hs2_enabled = false;
+	priv->check_tdls_tx = false;
 	memcpy(priv->tos_to_tid_inv, tos_to_tid_inv, MAX_NUM_TID);
+
+	mwifiex_init_11h_params(priv);
 
 	return mwifiex_add_bss_prio_tbl(priv);
 }
@@ -281,9 +296,16 @@ static void mwifiex_init_adapter(struct mwifiex_adapter *adapter)
 	memset(&adapter->arp_filter, 0, sizeof(adapter->arp_filter));
 	adapter->arp_filter_size = 0;
 	adapter->max_mgmt_ie_index = MAX_MGMT_IE_INDEX;
-	adapter->ext_scan = true;
+	adapter->ext_scan = false;
 	adapter->key_api_major_ver = 0;
 	adapter->key_api_minor_ver = 0;
+	memset(adapter->perm_addr, 0xff, ETH_ALEN);
+	adapter->iface_limit.sta_intf = MWIFIEX_MAX_STA_NUM;
+	adapter->iface_limit.uap_intf = MWIFIEX_MAX_UAP_NUM;
+	adapter->iface_limit.p2p_intf = MWIFIEX_MAX_P2P_NUM;
+
+	setup_timer(&adapter->wakeup_timer, wakeup_timer_fn,
+		    (unsigned long)adapter);
 }
 
 /*
@@ -366,6 +388,7 @@ static void mwifiex_free_lock_list(struct mwifiex_adapter *adapter)
 			list_del(&priv->tx_ba_stream_tbl_ptr);
 			list_del(&priv->rx_reorder_tbl_ptr);
 			list_del(&priv->sta_list);
+			list_del(&priv->auto_tdls_list);
 		}
 	}
 }
@@ -389,7 +412,10 @@ mwifiex_adapter_cleanup(struct mwifiex_adapter *adapter)
 		return;
 	}
 
+	del_timer(&adapter->wakeup_timer);
 	mwifiex_cancel_all_pending_cmd(adapter);
+	wake_up_interruptible(&adapter->cmd_wait_q.wait);
+	wake_up_interruptible(&adapter->hs_activate_wait_q);
 
 	/* Free lock variables */
 	mwifiex_free_lock_list(adapter);
@@ -407,6 +433,11 @@ mwifiex_adapter_cleanup(struct mwifiex_adapter *adapter)
 			entry->mem_ptr = NULL;
 		}
 		entry->mem_size = 0;
+	}
+
+	if (adapter->drv_info_dump) {
+		vfree(adapter->drv_info_dump);
+		adapter->drv_info_size = 0;
 	}
 
 	if (adapter->sleep_cfm)
@@ -434,6 +465,7 @@ int mwifiex_init_lock_list(struct mwifiex_adapter *adapter)
 			spin_lock_init(&priv->wmm.ra_list_spinlock);
 			spin_lock_init(&priv->curr_bcn_buf_lock);
 			spin_lock_init(&priv->sta_list_spinlock);
+			spin_lock_init(&priv->auto_tdls_lock);
 		}
 	}
 
@@ -449,7 +481,6 @@ int mwifiex_init_lock_list(struct mwifiex_adapter *adapter)
 	spin_lock_init(&adapter->scan_pending_q_lock);
 	spin_lock_init(&adapter->rx_proc_lock);
 
-	skb_queue_head_init(&adapter->usb_rx_data_q);
 	skb_queue_head_init(&adapter->rx_data_q);
 
 	for (i = 0; i < adapter->priv_num; ++i) {
@@ -466,10 +497,14 @@ int mwifiex_init_lock_list(struct mwifiex_adapter *adapter)
 		INIT_LIST_HEAD(&priv->tx_ba_stream_tbl_ptr);
 		INIT_LIST_HEAD(&priv->rx_reorder_tbl_ptr);
 		INIT_LIST_HEAD(&priv->sta_list);
+		INIT_LIST_HEAD(&priv->auto_tdls_list);
 		skb_queue_head_init(&priv->tdls_txq);
 
 		spin_lock_init(&priv->tx_ba_stream_tbl_lock);
 		spin_lock_init(&priv->rx_reorder_tbl_lock);
+
+		spin_lock_init(&priv->ack_status_lock);
+		idr_init(&priv->ack_status_frames);
 	}
 
 	return 0;
@@ -522,7 +557,8 @@ int mwifiex_init_fw(struct mwifiex_adapter *adapter)
 
 	for (i = 0; i < adapter->priv_num; i++) {
 		if (adapter->priv[i]) {
-			ret = mwifiex_sta_init_cmd(adapter->priv[i], first_sta);
+			ret = mwifiex_sta_init_cmd(adapter->priv[i], first_sta,
+						   true);
 			if (ret == -1)
 				return -1;
 
@@ -646,6 +682,8 @@ mwifiex_shutdown_drv(struct mwifiex_adapter *adapter)
 		if (adapter->priv[i]) {
 			priv = adapter->priv[i];
 
+			mwifiex_clean_auto_tdls(priv);
+			mwifiex_abort_cac(priv);
 			mwifiex_clean_txrx(priv);
 			mwifiex_delete_bss_prio_tbl(priv);
 		}
@@ -667,19 +705,6 @@ mwifiex_shutdown_drv(struct mwifiex_adapter *adapter)
 	spin_unlock_irqrestore(&adapter->rx_proc_lock, flags);
 
 	spin_lock(&adapter->mwifiex_lock);
-
-	if (adapter->if_ops.data_complete) {
-		while ((skb = skb_dequeue(&adapter->usb_rx_data_q))) {
-			struct mwifiex_rxinfo *rx_info = MWIFIEX_SKB_RXCB(skb);
-
-			priv = adapter->priv[rx_info->bss_num];
-			if (priv)
-				priv->stats.rx_dropped++;
-
-			dev_kfree_skb_any(skb);
-			adapter->if_ops.data_complete(adapter);
-		}
-	}
 
 	mwifiex_adapter_cleanup(adapter);
 

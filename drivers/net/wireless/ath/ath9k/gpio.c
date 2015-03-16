@@ -25,7 +25,12 @@ static void ath_led_brightness(struct led_classdev *led_cdev,
 			       enum led_brightness brightness)
 {
 	struct ath_softc *sc = container_of(led_cdev, struct ath_softc, led_cdev);
-	ath9k_hw_set_gpio(sc->sc_ah, sc->sc_ah->led_pin, (brightness == LED_OFF));
+	u32 val = (brightness == LED_OFF);
+
+	if (sc->sc_ah->config.led_active_high)
+		val = !val;
+
+	ath9k_hw_set_gpio(sc->sc_ah, sc->sc_ah->led_pin, val);
 }
 
 void ath_deinit_leds(struct ath_softc *sc)
@@ -44,7 +49,7 @@ void ath_init_leds(struct ath_softc *sc)
 	if (AR_SREV_9100(sc->sc_ah))
 		return;
 
-	if (!led_blink)
+	if (!ath9k_led_blink)
 		sc->led_cdev.default_trigger =
 			ieee80211_get_radio_led_name(sc->hw);
 
@@ -82,7 +87,7 @@ void ath_fill_led_pin(struct ath_softc *sc)
 	ath9k_hw_cfg_output(ah, ah->led_pin, AR_GPIO_OUTPUT_MUX_AS_OUTPUT);
 
 	/* LED off, active low */
-	ath9k_hw_set_gpio(ah, ah->led_pin, 1);
+	ath9k_hw_set_gpio(ah, ah->led_pin, (ah->config.led_active_high) ? 0 : 1);
 }
 #endif
 

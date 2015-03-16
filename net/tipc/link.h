@@ -37,8 +37,13 @@
 #ifndef _TIPC_LINK_H
 #define _TIPC_LINK_H
 
+#include <net/genetlink.h>
 #include "msg.h"
 #include "node.h"
+
+/* TIPC-specific error codes
+*/
+#define ELINKCONG EAGAIN	/* link congestion <=> resource unavailable */
 
 /* Out-of-range value for link sequence numbers
  */
@@ -98,13 +103,14 @@ struct tipc_stats {
  * @media_addr: media address to use when sending messages over link
  * @timer: link timer
  * @owner: pointer to peer node
+ * @refcnt: reference counter for permanent references (owner node & timer)
  * @flags: execution state flags for link endpoint instance
  * @checkpoint: reference point for triggering link continuity checking
  * @peer_session: link session # being used by peer end of link
  * @peer_bearer_id: bearer id used by link's peer endpoint
  * @bearer_id: local bearer id used by link
  * @tolerance: minimum link continuity loss needed to reset link [in ms]
- * @continuity_interval: link continuity testing interval [in ms]
+ * @cont_intv: link continuity testing interval
  * @abort_limit: # of unacknowledged continuity probes needed to reset link
  * @state: current state of link FSM
  * @fsm_msg_cnt: # of protocol messages link FSM has sent in current state
@@ -118,22 +124,17 @@ struct tipc_stats {
  * @max_pkt: current maximum packet size for this link
  * @max_pkt_target: desired maximum packet size for this link
  * @max_pkt_probes: # of probes based on current (max_pkt, max_pkt_target)
- * @out_queue_size: # of messages in outbound message queue
- * @first_out: ptr to first outbound message in queue
- * @last_out: ptr to last outbound message in queue
+ * @outqueue: outbound message queue
  * @next_out_no: next sequence number to use for outbound messages
  * @last_retransmitted: sequence number of most recently retransmitted message
  * @stale_count: # of identical retransmit requests made by peer
  * @next_in_no: next sequence number to expect for inbound messages
- * @deferred_inqueue_sz: # of messages in inbound message queue
- * @oldest_deferred_in: ptr to first inbound message in queue
- * @newest_deferred_in: ptr to last inbound message in queue
+ * @deferred_queue: deferred queue saved OOS b'cast message received from node
  * @unacked_window: # of inbound messages rx'd without ack'ing back to peer
- * @proto_msg_queue: ptr to (single) outbound control message
- * @retransm_queue_size: number of messages to retransmit
- * @retransm_queue_head: sequence number of first message to retransmit
+ * @inputq: buffer queue for messages to be delivered upwards
+ * @namedq: buffer queue for name table messages to be delivered upwards
  * @next_out: ptr to first unsent outbound message in queue
- * @waiting_sks: linked list of sockets waiting for link congestion to abate
+ * @wakeupq: linked list of wakeup msgs waiting for link congestion to abate
  * @long_msg_seq_no: next identifier to use for outbound fragmented messages
  * @reasm_buf: head of partially reassembled inbound message fragments
  * @stats: collects statistics regarding link activity
@@ -144,6 +145,7 @@ struct tipc_link {
 	struct tipc_media_addr media_addr;
 	struct timer_list timer;
 	struct tipc_node *owner;
+	struct kref ref;
 
 	/* Management and link supervision data */
 	unsigned int flags;
@@ -152,7 +154,7 @@ struct tipc_link {
 	u32 peer_bearer_id;
 	u32 bearer_id;
 	u32 tolerance;
-	u32 continuity_interval;
+	unsigned long cont_intv;
 	u32 abort_limit;
 	int state;
 	u32 fsm_msg_cnt;
@@ -175,26 +177,21 @@ struct tipc_link {
 	u32 max_pkt_probes;
 
 	/* Sending */
-	u32 out_queue_size;
-	struct sk_buff *first_out;
-	struct sk_buff *last_out;
+	struct sk_buff_head outqueue;
 	u32 next_out_no;
 	u32 last_retransmitted;
 	u32 stale_count;
 
 	/* Reception */
 	u32 next_in_no;
-	u32 deferred_inqueue_sz;
-	struct sk_buff *oldest_deferred_in;
-	struct sk_buff *newest_deferred_in;
+	struct sk_buff_head deferred_queue;
 	u32 unacked_window;
+	struct sk_buff_head inputq;
+	struct sk_buff_head namedq;
 
 	/* Congestion handling */
-	struct sk_buff *proto_msg_queue;
-	u32 retransm_queue_size;
-	u32 retransm_queue_head;
 	struct sk_buff *next_out;
-	struct sk_buff_head waiting_sks;
+	struct sk_buff_head wakeupq;
 
 	/* Fragmentation/reassembly */
 	u32 long_msg_seq_no;
@@ -209,35 +206,40 @@ struct tipc_port;
 struct tipc_link *tipc_link_create(struct tipc_node *n_ptr,
 			      struct tipc_bearer *b_ptr,
 			      const struct tipc_media_addr *media_addr);
-void tipc_link_delete_list(unsigned int bearer_id, bool shutting_down);
+void tipc_link_delete(struct tipc_link *link);
+void tipc_link_delete_list(struct net *net, unsigned int bearer_id,
+			   bool shutting_down);
 void tipc_link_failover_send_queue(struct tipc_link *l_ptr);
 void tipc_link_dup_queue_xmit(struct tipc_link *l_ptr, struct tipc_link *dest);
 void tipc_link_reset_fragments(struct tipc_link *l_ptr);
 int tipc_link_is_up(struct tipc_link *l_ptr);
 int tipc_link_is_active(struct tipc_link *l_ptr);
 void tipc_link_purge_queues(struct tipc_link *l_ptr);
-struct sk_buff *tipc_link_cmd_config(const void *req_tlv_area,
-				     int req_tlv_space,
-				     u16 cmd);
-struct sk_buff *tipc_link_cmd_show_stats(const void *req_tlv_area,
-					 int req_tlv_space);
-struct sk_buff *tipc_link_cmd_reset_stats(const void *req_tlv_area,
-					  int req_tlv_space);
 void tipc_link_reset_all(struct tipc_node *node);
 void tipc_link_reset(struct tipc_link *l_ptr);
-void tipc_link_reset_list(unsigned int bearer_id);
-int tipc_link_xmit(struct sk_buff *buf, u32 dest, u32 selector);
-int __tipc_link_xmit(struct tipc_link *link, struct sk_buff *buf);
-u32 tipc_link_get_max_pkt(u32 dest, u32 selector);
-void tipc_link_bundle_rcv(struct sk_buff *buf);
+void tipc_link_reset_list(struct net *net, unsigned int bearer_id);
+int tipc_link_xmit_skb(struct net *net, struct sk_buff *skb, u32 dest,
+		       u32 selector);
+int tipc_link_xmit(struct net *net, struct sk_buff_head *list, u32 dest,
+		   u32 selector);
+int __tipc_link_xmit(struct net *net, struct tipc_link *link,
+		     struct sk_buff_head *list);
 void tipc_link_proto_xmit(struct tipc_link *l_ptr, u32 msg_typ, int prob,
 			  u32 gap, u32 tolerance, u32 priority, u32 acked_mtu);
-void tipc_link_push_queue(struct tipc_link *l_ptr);
-u32 tipc_link_defer_pkt(struct sk_buff **head, struct sk_buff **tail,
-			struct sk_buff *buf);
+void tipc_link_push_packets(struct tipc_link *l_ptr);
+u32 tipc_link_defer_pkt(struct sk_buff_head *list, struct sk_buff *buf);
 void tipc_link_set_queue_limits(struct tipc_link *l_ptr, u32 window);
 void tipc_link_retransmit(struct tipc_link *l_ptr,
 			  struct sk_buff *start, u32 retransmits);
+struct sk_buff *tipc_skb_queue_next(const struct sk_buff_head *list,
+				    const struct sk_buff *skb);
+
+int tipc_nl_link_dump(struct sk_buff *skb, struct netlink_callback *cb);
+int tipc_nl_link_get(struct sk_buff *skb, struct genl_info *info);
+int tipc_nl_link_set(struct sk_buff *skb, struct genl_info *info);
+int tipc_nl_link_reset_stats(struct sk_buff *skb, struct genl_info *info);
+int tipc_nl_parse_link_prop(struct nlattr *prop, struct nlattr *props[]);
+void link_prepare_wakeup(struct tipc_link *l);
 
 /*
  * Link sequence number manipulation routines (uses modulo 2**16 arithmetic)
@@ -252,18 +254,14 @@ static inline u32 mod(u32 x)
 	return x & 0xffffu;
 }
 
-static inline int between(u32 lower, u32 upper, u32 n)
-{
-	if ((lower < n) && (n < upper))
-		return 1;
-	if ((upper < lower) && ((n > lower) || (n < upper)))
-		return 1;
-	return 0;
-}
-
 static inline int less_eq(u32 left, u32 right)
 {
 	return mod(right - left) < 32768u;
+}
+
+static inline int more(u32 left, u32 right)
+{
+	return !less_eq(left, right);
 }
 
 static inline int less(u32 left, u32 right)
@@ -276,6 +274,10 @@ static inline u32 lesser(u32 left, u32 right)
 	return less_eq(left, right) ? left : right;
 }
 
+static inline u32 link_own_addr(struct tipc_link *l)
+{
+	return msg_prevnode(l->pmsg);
+}
 
 /*
  * Link status checking routines
@@ -302,7 +304,7 @@ static inline int link_reset_reset(struct tipc_link *l_ptr)
 
 static inline int link_congested(struct tipc_link *l_ptr)
 {
-	return l_ptr->out_queue_size >= l_ptr->queue_limit[0];
+	return skb_queue_len(&l_ptr->outqueue) >= l_ptr->queue_limit[0];
 }
 
 #endif

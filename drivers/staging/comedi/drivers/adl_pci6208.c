@@ -19,8 +19,7 @@
 /*
  * Driver: adl_pci6208
  * Description: ADLink PCI-6208/6216 Series Multi-channel Analog Output Cards
- * Devices: (ADLink) PCI-6208 [adl_pci6208]
- *	    (ADLink) PCI-6216 [adl_pci6216]
+ * Devices: [ADLink] PCI-6208 (adl_pci6208), PCI-6216 (adl_pci6216)
  * Author: nsyeow <nsyeow@pd.jaring.my>
  * Updated: Fri, 30 Jan 2004 14:44:27 +0800
  * Status: untested
@@ -169,7 +168,6 @@ static int pci6208_auto_attach(struct comedi_device *dev,
 	s->maxdata	= 0xffff;
 	s->range_table	= &range_bipolar10;
 	s->insn_write	= pci6208_ao_insn_write;
-	s->insn_read	= comedi_readback_insn_read;
 
 	ret = comedi_alloc_subdev_readback(s);
 	if (ret)

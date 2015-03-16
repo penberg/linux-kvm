@@ -215,12 +215,7 @@ static inline unsigned short stap(void)
 /*
  * Give up the time slice of the virtual PU.
  */
-static inline void cpu_relax(void)
-{
-	if (MACHINE_HAS_DIAG44)
-		asm volatile("diag 0,0,68");
-	barrier();
-}
+void cpu_relax(void);
 
 #define cpu_relax_lowlatency()  barrier()
 

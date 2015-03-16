@@ -25,28 +25,14 @@
  * Author: Jon Grierson <jd@renko.co.uk>,
  *	   Frank Mori Hess <fmhess@users.sourceforge.net>
  * Status: testing
- * Devices: (National Instruments) PCI-6509 [ni_65xx]
- *	    (National Instruments) PXI-6509 [ni_65xx]
- *	    (National Instruments) PCI-6510 [ni_65xx]
- *	    (National Instruments) PCI-6511 [ni_65xx]
- *	    (National Instruments) PXI-6511 [ni_65xx]
- *	    (National Instruments) PCI-6512 [ni_65xx]
- *	    (National Instruments) PXI-6512 [ni_65xx]
- *	    (National Instruments) PCI-6513 [ni_65xx]
- *	    (National Instruments) PXI-6513 [ni_65xx]
- *	    (National Instruments) PCI-6514 [ni_65xx]
- *	    (National Instruments) PXI-6514 [ni_65xx]
- *	    (National Instruments) PCI-6515 [ni_65xx]
- *	    (National Instruments) PXI-6515 [ni_65xx]
- *	    (National Instruments) PCI-6516 [ni_65xx]
- *	    (National Instruments) PCI-6517 [ni_65xx]
- *	    (National Instruments) PCI-6518 [ni_65xx]
- *	    (National Instruments) PCI-6519 [ni_65xx]
- *	    (National Instruments) PCI-6520 [ni_65xx]
- *	    (National Instruments) PCI-6521 [ni_65xx]
- *	    (National Instruments) PXI-6521 [ni_65xx]
- *	    (National Instruments) PCI-6528 [ni_65xx]
- *	    (National Instruments) PXI-6528 [ni_65xx]
+ * Devices: [National Instruments] PCI-6509 (pci-6509), PXI-6509 (pxi-6509),
+ *   PCI-6510 (pci-6510), PCI-6511 (pci-6511), PXI-6511 (pxi-6511),
+ *   PCI-6512 (pci-6512), PXI-6512 (pxi-6512), PCI-6513 (pci-6513),
+ *   PXI-6513 (pxi-6513), PCI-6514 (pci-6514), PXI-6514 (pxi-6514),
+ *   PCI-6515 (pxi-6515), PXI-6515 (pxi-6515), PCI-6516 (pci-6516),
+ *   PCI-6517 (pci-6517), PCI-6518 (pci-6518), PCI-6519 (pci-6519),
+ *   PCI-6520 (pci-6520), PCI-6521 (pci-6521), PXI-6521 (pxi-6521),
+ *   PCI-6528 (pci-6528), PXI-6528 (pxi-6528)
  * Updated: Mon, 21 Jul 2014 12:49:58 +0000
  *
  * Configuration Options: not applicable, uses PCI auto config
@@ -508,9 +494,9 @@ static irqreturn_t ni_65xx_interrupt(int irq, void *d)
 	writeb(NI_65XX_CLR_EDGE_INT | NI_65XX_CLR_OVERFLOW_INT,
 	       dev->mmio + NI_65XX_CLR_REG);
 
-	comedi_buf_put(s, 0);
-	s->async->events |= COMEDI_CB_EOS;
-	comedi_event(dev, s);
+	comedi_buf_write_samples(s, &s->state, 1);
+	comedi_handle_events(dev, s);
+
 	return IRQ_HANDLED;
 }
 
@@ -533,9 +519,6 @@ static int ni_65xx_intr_cmdtest(struct comedi_device *dev,
 
 	/* Step 2a : make sure trigger sources are unique */
 	/* Step 2b : and mutually compatible */
-
-	if (err)
-		return 2;
 
 	/* Step 3: check if arguments are trivially valid */
 

@@ -102,6 +102,28 @@ enum {
 	 */
 	HCI_QUIRK_FIXUP_BUFFER_SIZE,
 
+	/* When this quirk is set, then a controller that does not
+	 * indicate support for Inquiry Result with RSSI is assumed to
+	 * support it anyway. Some early Bluetooth 1.2 controllers had
+	 * wrongly configured local features that will require forcing
+	 * them to enable this mode. Getting RSSI information with the
+	 * inquiry responses is preferred since it allows for a better
+	 * user expierence.
+	 *
+	 * This quirk must be set before hci_register_dev is called.
+	 */
+	HCI_QUIRK_FIXUP_INQUIRY_MODE,
+
+	/* When this quirk is set, then the HCI Read Local Supported
+	 * Commands command is not supported. In general Bluetooth 1.2
+	 * and later controllers should support this command. However
+	 * some controllers indicate Bluetooth 1.2 support, but do
+	 * not support this command.
+	 *
+	 * This quirk must be set before hci_register_dev is called.
+	 */
+	HCI_QUIRK_BROKEN_LOCAL_COMMANDS,
+
 	/* When this quirk is set, then no stored link key handling
 	 * is performed. This is mainly due to the fact that the
 	 * HCI Delete Stored Link Key command is advertised, but
@@ -129,6 +151,15 @@ enum {
 	 * during the hdev->setup vendor callback.
 	 */
 	HCI_QUIRK_INVALID_BDADDR,
+
+	/* When this quirk is set, the duplicate filtering during
+	 * scanning is based on Bluetooth devices addresses. To allow
+	 * RSSI based updates, restart scanning if needed.
+	 *
+	 * This quirk can be set before hci_register_dev is called or
+	 * during the hdev->setup vendor callback.
+	 */
+	HCI_QUIRK_STRICT_DUPLICATE_FILTER,
 };
 
 /* HCI device flags */
@@ -153,7 +184,7 @@ enum {
  */
 enum {
 	HCI_DUT_MODE,
-	HCI_FORCE_SC,
+	HCI_FORCE_BREDR_SMP,
 	HCI_FORCE_STATIC_ADDR,
 };
 
@@ -265,6 +296,7 @@ enum {
 /* Low Energy links do not have defined link type. Use invented one */
 #define LE_LINK		0x80
 #define AMP_LINK	0x81
+#define INVALID_LINK	0xff
 
 /* LMP features */
 #define LMP_3SLOT	0x01
@@ -332,6 +364,8 @@ enum {
 #define HCI_LE_ENCRYPTION		0x01
 #define HCI_LE_CONN_PARAM_REQ_PROC	0x02
 #define HCI_LE_PING			0x10
+#define HCI_LE_DATA_LEN_EXT		0x20
+#define HCI_LE_EXT_SCAN_POLICY		0x80
 
 /* Connection modes */
 #define HCI_CM_ACTIVE	0x0000
@@ -401,6 +435,7 @@ enum {
 
 /* The core spec defines 127 as the "not available" value */
 #define HCI_TX_POWER_INVALID	127
+#define HCI_RSSI_INVALID	127
 
 #define HCI_ROLE_MASTER		0x00
 #define HCI_ROLE_SLAVE		0x01
@@ -629,7 +664,7 @@ struct hci_cp_user_passkey_reply {
 struct hci_cp_remote_oob_data_reply {
 	bdaddr_t bdaddr;
 	__u8     hash[16];
-	__u8     randomizer[16];
+	__u8     rand[16];
 } __packed;
 
 #define HCI_OP_REMOTE_OOB_DATA_NEG_REPLY	0x0433
@@ -721,9 +756,9 @@ struct hci_rp_set_csb {
 struct hci_cp_remote_oob_ext_data_reply {
 	bdaddr_t bdaddr;
 	__u8     hash192[16];
-	__u8     randomizer192[16];
+	__u8     rand192[16];
 	__u8     hash256[16];
-	__u8     randomizer256[16];
+	__u8     rand256[16];
 } __packed;
 
 #define HCI_OP_SNIFF_MODE		0x0803
@@ -820,10 +855,25 @@ struct hci_cp_set_event_flt {
 #define HCI_CONN_SETUP_AUTO_OFF	0x01
 #define HCI_CONN_SETUP_AUTO_ON	0x02
 
+#define HCI_OP_READ_STORED_LINK_KEY	0x0c0d
+struct hci_cp_read_stored_link_key {
+	bdaddr_t bdaddr;
+	__u8     read_all;
+} __packed;
+struct hci_rp_read_stored_link_key {
+	__u8     status;
+	__u8     max_keys;
+	__u8     num_keys;
+} __packed;
+
 #define HCI_OP_DELETE_STORED_LINK_KEY	0x0c12
 struct hci_cp_delete_stored_link_key {
 	bdaddr_t bdaddr;
 	__u8     delete_all;
+} __packed;
+struct hci_rp_delete_stored_link_key {
+	__u8     status;
+	__u8     num_keys;
 } __packed;
 
 #define HCI_MAX_NAME_LENGTH		248
@@ -930,7 +980,7 @@ struct hci_cp_write_ssp_mode {
 struct hci_rp_read_local_oob_data {
 	__u8     status;
 	__u8     hash[16];
-	__u8     randomizer[16];
+	__u8     rand[16];
 } __packed;
 
 #define HCI_OP_READ_INQ_RSP_TX_POWER	0x0c58
@@ -1014,9 +1064,9 @@ struct hci_cp_write_sc_support {
 struct hci_rp_read_local_oob_ext_data {
 	__u8     status;
 	__u8     hash192[16];
-	__u8     randomizer192[16];
+	__u8     rand192[16];
 	__u8     hash256[16];
-	__u8     randomizer256[16];
+	__u8     rand256[16];
 } __packed;
 
 #define HCI_OP_READ_LOCAL_VERSION	0x1001
@@ -1358,6 +1408,39 @@ struct hci_cp_le_conn_param_req_neg_reply {
 	__u8	reason;
 } __packed;
 
+#define HCI_OP_LE_SET_DATA_LEN		0x2022
+struct hci_cp_le_set_data_len {
+	__le16	handle;
+	__le16	tx_len;
+	__le16	tx_time;
+} __packed;
+struct hci_rp_le_set_data_len {
+	__u8	status;
+	__le16	handle;
+} __packed;
+
+#define HCI_OP_LE_READ_DEF_DATA_LEN	0x2023
+struct hci_rp_le_read_def_data_len {
+	__u8	status;
+	__le16	tx_len;
+	__le16	tx_time;
+} __packed;
+
+#define HCI_OP_LE_WRITE_DEF_DATA_LEN	0x2024
+struct hci_cp_le_write_def_data_len {
+	__le16	tx_len;
+	__le16	tx_time;
+} __packed;
+
+#define HCI_OP_LE_READ_MAX_DATA_LEN	0x202f
+struct hci_rp_le_read_max_data_len {
+	__u8	status;
+	__le16	tx_len;
+	__le16	tx_time;
+	__le16	rx_len;
+	__le16	rx_time;
+} __packed;
+
 /* ---- HCI Events ---- */
 #define HCI_EV_INQUIRY_COMPLETE		0x01
 
@@ -1461,6 +1544,11 @@ struct hci_ev_cmd_status {
 	__u8     status;
 	__u8     ncmd;
 	__le16   opcode;
+} __packed;
+
+#define HCI_EV_HARDWARE_ERROR		0x10
+struct hci_ev_hardware_error {
+	__u8     code;
 } __packed;
 
 #define HCI_EV_ROLE_CHANGE		0x12
@@ -1734,6 +1822,25 @@ struct hci_ev_le_conn_complete {
 	__u8     clk_accurancy;
 } __packed;
 
+/* Advertising report event types */
+#define LE_ADV_IND		0x00
+#define LE_ADV_DIRECT_IND	0x01
+#define LE_ADV_SCAN_IND		0x02
+#define LE_ADV_NONCONN_IND	0x03
+#define LE_ADV_SCAN_RSP		0x04
+
+#define ADDR_LE_DEV_PUBLIC	0x00
+#define ADDR_LE_DEV_RANDOM	0x01
+
+#define HCI_EV_LE_ADVERTISING_REPORT	0x02
+struct hci_ev_le_advertising_info {
+	__u8	 evt_type;
+	__u8	 bdaddr_type;
+	bdaddr_t bdaddr;
+	__u8	 length;
+	__u8	 data[0];
+} __packed;
+
 #define HCI_EV_LE_CONN_UPDATE_COMPLETE	0x03
 struct hci_ev_le_conn_update_complete {
 	__u8     status;
@@ -1759,23 +1866,23 @@ struct hci_ev_le_remote_conn_param_req {
 	__le16 timeout;
 } __packed;
 
-/* Advertising report event types */
-#define LE_ADV_IND		0x00
-#define LE_ADV_DIRECT_IND	0x01
-#define LE_ADV_SCAN_IND		0x02
-#define LE_ADV_NONCONN_IND	0x03
-#define LE_ADV_SCAN_RSP		0x04
+#define HCI_EV_LE_DATA_LEN_CHANGE	0x07
+struct hci_ev_le_data_len_change {
+	__le16	handle;
+	__le16	tx_len;
+	__le16	tx_time;
+	__le16	rx_len;
+	__le16	rx_time;
+} __packed;
 
-#define ADDR_LE_DEV_PUBLIC	0x00
-#define ADDR_LE_DEV_RANDOM	0x01
-
-#define HCI_EV_LE_ADVERTISING_REPORT	0x02
-struct hci_ev_le_advertising_info {
+#define HCI_EV_LE_DIRECT_ADV_REPORT	0x0B
+struct hci_ev_le_direct_adv_info {
 	__u8	 evt_type;
 	__u8	 bdaddr_type;
 	bdaddr_t bdaddr;
-	__u8	 length;
-	__u8	 data[0];
+	__u8	 direct_addr_type;
+	bdaddr_t direct_addr;
+	__s8	 rssi;
 } __packed;
 
 /* Internal events generated by Bluetooth stack */

@@ -49,9 +49,6 @@ int perf_session__peek_event(struct perf_session *session, off_t file_offset,
 			     union perf_event **event_ptr,
 			     struct perf_sample *sample);
 
-int __perf_session__process_events(struct perf_session *session,
-				   u64 data_offset, u64 data_size, u64 size,
-				   struct perf_tool *tool);
 int perf_session__process_events(struct perf_session *session,
 				 struct perf_tool *tool);
 
@@ -126,4 +123,19 @@ int __perf_session__set_tracepoints_handlers(struct perf_session *session,
 extern volatile int session_done;
 
 #define session_done()	ACCESS_ONCE(session_done)
+
+int perf_session__deliver_synth_event(struct perf_session *session,
+				      union perf_event *event,
+				      struct perf_sample *sample,
+				      struct perf_tool *tool);
+
+int perf_event__process_id_index(struct perf_tool *tool,
+				 union perf_event *event,
+				 struct perf_session *session);
+
+int perf_event__synthesize_id_index(struct perf_tool *tool,
+				    perf_event__handler_t process,
+				    struct perf_evlist *evlist,
+				    struct machine *machine);
+
 #endif /* __PERF_SESSION_H */

@@ -14,24 +14,23 @@
  */
 
 /*
- Driver: dyna_pci10xx
- Devices: Dynalog India PCI DAQ Cards, http://www.dynalogindia.com/
- Author: Prashant Shah <pshah.mumbai@gmail.com>
- Developed at Automation Labs, Chemical Dept., IIT Bombay, India.
- Prof. Kannan Moudgalya <kannan@iitb.ac.in>
- http://www.iitb.ac.in
- Status: Stable
- Version: 1.0
- Device Supported :
- - Dynalog PCI 1050
-
- Notes :
- - Dynalog India Pvt. Ltd. does not have a registered PCI Vendor ID and
- they are using the PLX Technlogies Vendor ID since that is the PCI Chip used
- in the card.
- - Dynalog India Pvt. Ltd. has provided the internal register specification for
- their cards in their manuals.
-*/
+ * Driver: dyna_pci10xx
+ * Description: Dynalog India PCI DAQ Cards, http://www.dynalogindia.com/
+ * Devices: [Dynalog] PCI-1050 (dyna_pci1050)
+ * Author: Prashant Shah <pshah.mumbai@gmail.com>
+ * Status: Stable
+ *
+ * Developed at Automation Labs, Chemical Dept., IIT Bombay, India.
+ * Prof. Kannan Moudgalya <kannan@iitb.ac.in>
+ * http://www.iitb.ac.in
+ *
+ * Notes :
+ * - Dynalog India Pvt. Ltd. does not have a registered PCI Vendor ID and
+ *   they are using the PLX Technlogies Vendor ID since that is the PCI Chip
+ *   used in the card.
+ * - Dynalog India Pvt. Ltd. has provided the internal register specification
+ *   for their cards in their manuals.
+ */
 
 #include <linux/module.h>
 #include <linux/delay.h>
@@ -218,7 +217,7 @@ static int dyna_pci10xx_auto_attach(struct comedi_device *dev,
 	/* digital input */
 	s = &dev->subdevices[2];
 	s->type = COMEDI_SUBD_DI;
-	s->subdev_flags = SDF_READABLE | SDF_GROUND;
+	s->subdev_flags = SDF_READABLE;
 	s->n_chan = 16;
 	s->maxdata = 1;
 	s->range_table = &range_digital;
@@ -228,7 +227,7 @@ static int dyna_pci10xx_auto_attach(struct comedi_device *dev,
 	/* digital output */
 	s = &dev->subdevices[3];
 	s->type = COMEDI_SUBD_DO;
-	s->subdev_flags = SDF_WRITABLE | SDF_GROUND;
+	s->subdev_flags = SDF_WRITABLE;
 	s->n_chan = 16;
 	s->maxdata = 1;
 	s->range_table = &range_digital;

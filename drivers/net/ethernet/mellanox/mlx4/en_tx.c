@@ -46,7 +46,7 @@
 #include "mlx4_en.h"
 
 int mlx4_en_create_tx_ring(struct mlx4_en_priv *priv,
-			   struct mlx4_en_tx_ring **pring, int qpn, u32 size,
+			   struct mlx4_en_tx_ring **pring, u32 size,
 			   u16 stride, int node, int queue_index)
 {
 	struct mlx4_en_dev *mdev = priv->mdev;
@@ -91,10 +91,10 @@ int mlx4_en_create_tx_ring(struct mlx4_en_priv *priv,
 	ring->buf_size = ALIGN(size * ring->stride, MLX4_EN_PAGE_SIZE);
 
 	/* Allocate HW buffers on provided NUMA node */
-	set_dev_node(&mdev->dev->pdev->dev, node);
+	set_dev_node(&mdev->dev->persist->pdev->dev, node);
 	err = mlx4_alloc_hwq_res(mdev->dev, &ring->wqres, ring->buf_size,
 				 2 * PAGE_SIZE);
-	set_dev_node(&mdev->dev->pdev->dev, mdev->dev->numa_node);
+	set_dev_node(&mdev->dev->persist->pdev->dev, mdev->dev->numa_node);
 	if (err) {
 		en_err(priv, "Failed allocating hwq resources\n");
 		goto err_bounce;
@@ -112,11 +112,17 @@ int mlx4_en_create_tx_ring(struct mlx4_en_priv *priv,
 	       ring, ring->buf, ring->size, ring->buf_size,
 	       (unsigned long long) ring->wqres.buf.direct.map);
 
-	ring->qpn = qpn;
+	err = mlx4_qp_reserve_range(mdev->dev, 1, 1, &ring->qpn,
+				    MLX4_RESERVE_ETH_BF_QP);
+	if (err) {
+		en_err(priv, "failed reserving qp for TX ring\n");
+		goto err_map;
+	}
+
 	err = mlx4_qp_alloc(mdev->dev, ring->qpn, &ring->qp, GFP_KERNEL);
 	if (err) {
 		en_err(priv, "Failed allocating qp %d\n", ring->qpn);
-		goto err_map;
+		goto err_reserve;
 	}
 	ring->qp.event = mlx4_en_sqp_event;
 
@@ -143,6 +149,8 @@ int mlx4_en_create_tx_ring(struct mlx4_en_priv *priv,
 	*pring = ring;
 	return 0;
 
+err_reserve:
+	mlx4_qp_release_range(mdev->dev, ring->qpn, 1);
 err_map:
 	mlx4_en_unmap_buffer(&ring->wqres.buf);
 err_hwq_res:
@@ -479,8 +487,8 @@ void mlx4_en_tx_irq(struct mlx4_cq *mcq)
 	struct mlx4_en_cq *cq = container_of(mcq, struct mlx4_en_cq, mcq);
 	struct mlx4_en_priv *priv = netdev_priv(cq->dev);
 
-	if (priv->port_up)
-		napi_schedule(&cq->napi);
+	if (likely(priv->port_up))
+		napi_schedule_irqoff(&cq->napi);
 	else
 		mlx4_en_arm_cq(priv, cq);
 }
@@ -674,8 +682,8 @@ u16 mlx4_en_select_queue(struct net_device *dev, struct sk_buff *skb,
 	if (dev->num_tc)
 		return skb_tx_hash(dev, skb);
 
-	if (vlan_tx_tag_present(skb))
-		up = vlan_tx_tag_get(skb) >> VLAN_PRIO_SHIFT;
+	if (skb_vlan_tag_present(skb))
+		up = skb_vlan_tag_get(skb) >> VLAN_PRIO_SHIFT;
 
 	return fallback(dev, skb) % rings_p_up + up * rings_p_up;
 }
@@ -734,8 +742,8 @@ netdev_tx_t mlx4_en_xmit(struct sk_buff *skb, struct net_device *dev)
 		goto tx_drop;
 	}
 
-	if (vlan_tx_tag_present(skb))
-		vlan_tag = vlan_tx_tag_get(skb);
+	if (skb_vlan_tag_present(skb))
+		vlan_tag = skb_vlan_tag_get(skb);
 
 
 	netdev_txq_bql_enqueue_prefetchw(ring->tx_queue);
@@ -922,7 +930,7 @@ netdev_tx_t mlx4_en_xmit(struct sk_buff *skb, struct net_device *dev)
 	real_size = (real_size / 16) & 0x3f;
 
 	if (ring->bf_enabled && desc_size <= MAX_BF && !bounce &&
-	    !vlan_tx_tag_present(skb) && send_doorbell) {
+	    !skb_vlan_tag_present(skb) && send_doorbell) {
 		tx_desc->ctrl.bf_qpn = ring->doorbell_qpn |
 				       cpu_to_be32(real_size);
 
@@ -944,7 +952,7 @@ netdev_tx_t mlx4_en_xmit(struct sk_buff *skb, struct net_device *dev)
 	} else {
 		tx_desc->ctrl.vlan_tag = cpu_to_be16(vlan_tag);
 		tx_desc->ctrl.ins_vlan = MLX4_WQE_CTRL_INS_VLAN *
-			!!vlan_tx_tag_present(skb);
+			!!skb_vlan_tag_present(skb);
 		tx_desc->ctrl.fence_size = real_size;
 
 		/* Ensure new descriptor hits memory
@@ -954,7 +962,17 @@ netdev_tx_t mlx4_en_xmit(struct sk_buff *skb, struct net_device *dev)
 		tx_desc->ctrl.owner_opcode = op_own;
 		if (send_doorbell) {
 			wmb();
-			iowrite32(ring->doorbell_qpn,
+			/* Since there is no iowrite*_native() that writes the
+			 * value as is, without byteswapping - using the one
+			 * the doesn't do byteswapping in the relevant arch
+			 * endianness.
+			 */
+#if defined(__LITTLE_ENDIAN)
+			iowrite32(
+#else
+			iowrite32be(
+#endif
+				  ring->doorbell_qpn,
 				  ring->bf.uar->map + MLX4_SEND_DOORBELL);
 		} else {
 			ring->xmit_more++;

@@ -12,7 +12,6 @@
 #include <linux/errno.h>
 #include <linux/string.h>
 #include <linux/ctype.h>
-#include <linux/ftrace.h>
 #include <linux/lockdep.h>
 #include <linux/module.h>
 #include <linux/pfn.h>
@@ -397,6 +396,26 @@ static __init void detect_machine_facilities(void)
 #endif
 }
 
+static int __init cad_setup(char *str)
+{
+	int val;
+
+	get_option(&str, &val);
+	if (val && test_facility(128))
+		S390_lowcore.machine_flags |= MACHINE_FLAG_CAD;
+	return 0;
+}
+early_param("cad", cad_setup);
+
+static int __init cad_init(void)
+{
+	if (MACHINE_HAS_CAD)
+		/* Enable problem state CAD. */
+		__ctl_set_bit(2, 3);
+	return 0;
+}
+early_initcall(cad_init);
+
 static __init void rescue_initrd(void)
 {
 #ifdef CONFIG_BLK_DEV_INITRD
@@ -490,8 +509,5 @@ void __init startup_init(void)
 	detect_machine_facilities();
 	setup_topology();
 	sclp_early_detect();
-#ifdef CONFIG_DYNAMIC_FTRACE
-	S390_lowcore.ftrace_func = (unsigned long)ftrace_caller;
-#endif
 	lockdep_on();
 }

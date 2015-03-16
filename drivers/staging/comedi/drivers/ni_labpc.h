@@ -35,10 +35,10 @@ struct labpc_boardinfo {
 };
 
 struct labpc_private {
+	struct comedi_isadma *dma;
+
 	/*  number of data points left to be taken */
 	unsigned long long count;
-	/*  software copy of analog output values */
-	unsigned int ao_value[NUM_AO_CHAN];
 	/*  software copys of bits written to command registers */
 	unsigned int cmd1;
 	unsigned int cmd2;
@@ -63,17 +63,9 @@ struct labpc_private {
 	 * conversions
 	 */
 	unsigned int divisor_b1;
-	unsigned int dma_chan;	/*  dma channel to use */
-	u16 *dma_buffer;	/*  buffer ai will dma into */
-	phys_addr_t dma_addr;
-	/* transfer size in bytes for current transfer */
-	unsigned int dma_transfer_size;
+
 	/* we are using dma/fifo-half-full/etc. */
 	enum transfer_type current_transfer;
-	/* stores contents of board's eeprom */
-	unsigned int eeprom_data[EEPROM_SIZE];
-	/* stores settings of calibration dacs */
-	unsigned int caldac[16];
 	/*
 	 * function pointers so we can use inb/outb or readb/writeb as
 	 * appropriate

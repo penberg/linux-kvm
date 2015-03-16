@@ -74,6 +74,7 @@
 #include "fw-api-d3.h"
 #include "fw-api-coex.h"
 #include "fw-api-scan.h"
+#include "fw-api-stats.h"
 
 /* Tx queue numbers */
 enum {
@@ -106,6 +107,12 @@ enum {
 	DBG_CFG = 0x9,
 	ANTENNA_COUPLING_NOTIFICATION = 0xa,
 
+	/* UMAC scan commands */
+	SCAN_CFG_CMD = 0xc,
+	SCAN_REQ_UMAC = 0xd,
+	SCAN_ABORT_UMAC = 0xe,
+	SCAN_COMPLETE_UMAC = 0xf,
+
 	/* station table */
 	ADD_STA_KEY = 0x17,
 	ADD_STA = 0x18,
@@ -121,6 +128,14 @@ enum {
 
 	/* global key */
 	WEP_KEY = 0x20,
+
+	/* Memory */
+	SHARED_MEM_CFG = 0x25,
+
+	/* TDLS */
+	TDLS_CHANNEL_SWITCH_CMD = 0x27,
+	TDLS_CHANNEL_SWITCH_NOTIFICATION = 0xaa,
+	TDLS_CONFIG_CMD = 0xa7,
 
 	/* MAC and Binding commands */
 	MAC_CONTEXT_CMD = 0x28,
@@ -190,6 +205,8 @@ enum {
 	/* Power - new power table command */
 	MAC_PM_POWER_TABLE = 0xa9,
 
+	MFUART_LOAD_NOTIFICATION = 0xb1,
+
 	REPLY_RX_PHY_CMD = 0xc0,
 	REPLY_RX_MPDU_CMD = 0xc1,
 	BA_NOTIF = 0xc5,
@@ -236,11 +253,9 @@ enum {
 	WOWLAN_TX_POWER_PER_DB = 0xe6,
 
 	/* and for NetDetect */
-	NET_DETECT_CONFIG_CMD = 0x54,
-	NET_DETECT_PROFILES_QUERY_CMD = 0x56,
-	NET_DETECT_PROFILES_CMD = 0x57,
-	NET_DETECT_HOTSPOTS_CMD = 0x58,
-	NET_DETECT_HOTSPOTS_QUERY_CMD = 0x59,
+	SCAN_OFFLOAD_PROFILES_QUERY_CMD = 0x56,
+	SCAN_OFFLOAD_HOTSPOTS_CONFIG_CMD = 0x58,
+	SCAN_OFFLOAD_HOTSPOTS_QUERY_CMD = 0x59,
 
 	REPLY_MAX = 0xff,
 };
@@ -1201,6 +1216,21 @@ struct iwl_missed_beacons_notif {
 } __packed; /* MISSED_BEACON_NTFY_API_S_VER_3 */
 
 /**
+ * struct iwl_mfuart_load_notif - mfuart image version & status
+ * ( MFUART_LOAD_NOTIFICATION = 0xb1 )
+ * @installed_ver: installed image version
+ * @external_ver: external image version
+ * @status: MFUART loading status
+ * @duration: MFUART loading time
+*/
+struct iwl_mfuart_load_notif {
+	__le32 installed_ver;
+	__le32 external_ver;
+	__le32 status;
+	__le32 duration;
+} __packed; /*MFU_LOADER_NTFY_API_S_VER_1*/
+
+/**
  * struct iwl_set_calib_default_cmd - set default value for calibration.
  * ( SET_CALIB_DEFAULT_CMD = 0x8e )
  * @calib_index: the calibration to set value for
@@ -1355,214 +1385,6 @@ struct iwl_mvm_marker {
 	__le32 metadata[0];
 } __packed; /* MARKER_API_S_VER_1 */
 
-struct mvm_statistics_dbg {
-	__le32 burst_check;
-	__le32 burst_count;
-	__le32 wait_for_silence_timeout_cnt;
-	__le32 reserved[3];
-} __packed; /* STATISTICS_DEBUG_API_S_VER_2 */
-
-struct mvm_statistics_div {
-	__le32 tx_on_a;
-	__le32 tx_on_b;
-	__le32 exec_time;
-	__le32 probe_time;
-	__le32 rssi_ant;
-	__le32 reserved2;
-} __packed; /* STATISTICS_SLOW_DIV_API_S_VER_2 */
-
-struct mvm_statistics_general_common {
-	__le32 temperature;   /* radio temperature */
-	__le32 temperature_m; /* radio voltage */
-	struct mvm_statistics_dbg dbg;
-	__le32 sleep_time;
-	__le32 slots_out;
-	__le32 slots_idle;
-	__le32 ttl_timestamp;
-	struct mvm_statistics_div div;
-	__le32 rx_enable_counter;
-	/*
-	 * num_of_sos_states:
-	 *  count the number of times we have to re-tune
-	 *  in order to get out of bad PHY status
-	 */
-	__le32 num_of_sos_states;
-} __packed; /* STATISTICS_GENERAL_API_S_VER_5 */
-
-struct mvm_statistics_rx_non_phy {
-	__le32 bogus_cts;	/* CTS received when not expecting CTS */
-	__le32 bogus_ack;	/* ACK received when not expecting ACK */
-	__le32 non_bssid_frames;	/* number of frames with BSSID that
-					 * doesn't belong to the STA BSSID */
-	__le32 filtered_frames;	/* count frames that were dumped in the
-				 * filtering process */
-	__le32 non_channel_beacons;	/* beacons with our bss id but not on
-					 * our serving channel */
-	__le32 channel_beacons;	/* beacons with our bss id and in our
-				 * serving channel */
-	__le32 num_missed_bcon;	/* number of missed beacons */
-	__le32 adc_rx_saturation_time;	/* count in 0.8us units the time the
-					 * ADC was in saturation */
-	__le32 ina_detection_search_time;/* total time (in 0.8us) searched
-					  * for INA */
-	__le32 beacon_silence_rssi_a;	/* RSSI silence after beacon frame */
-	__le32 beacon_silence_rssi_b;	/* RSSI silence after beacon frame */
-	__le32 beacon_silence_rssi_c;	/* RSSI silence after beacon frame */
-	__le32 interference_data_flag;	/* flag for interference data
-					 * availability. 1 when data is
-					 * available. */
-	__le32 channel_load;		/* counts RX Enable time in uSec */
-	__le32 dsp_false_alarms;	/* DSP false alarm (both OFDM
-					 * and CCK) counter */
-	__le32 beacon_rssi_a;
-	__le32 beacon_rssi_b;
-	__le32 beacon_rssi_c;
-	__le32 beacon_energy_a;
-	__le32 beacon_energy_b;
-	__le32 beacon_energy_c;
-	__le32 num_bt_kills;
-	__le32 mac_id;
-	__le32 directed_data_mpdu;
-} __packed; /* STATISTICS_RX_NON_PHY_API_S_VER_3 */
-
-struct mvm_statistics_rx_phy {
-	__le32 ina_cnt;
-	__le32 fina_cnt;
-	__le32 plcp_err;
-	__le32 crc32_err;
-	__le32 overrun_err;
-	__le32 early_overrun_err;
-	__le32 crc32_good;
-	__le32 false_alarm_cnt;
-	__le32 fina_sync_err_cnt;
-	__le32 sfd_timeout;
-	__le32 fina_timeout;
-	__le32 unresponded_rts;
-	__le32 rxe_frame_limit_overrun;
-	__le32 sent_ack_cnt;
-	__le32 sent_cts_cnt;
-	__le32 sent_ba_rsp_cnt;
-	__le32 dsp_self_kill;
-	__le32 mh_format_err;
-	__le32 re_acq_main_rssi_sum;
-	__le32 reserved;
-} __packed; /* STATISTICS_RX_PHY_API_S_VER_2 */
-
-struct mvm_statistics_rx_ht_phy {
-	__le32 plcp_err;
-	__le32 overrun_err;
-	__le32 early_overrun_err;
-	__le32 crc32_good;
-	__le32 crc32_err;
-	__le32 mh_format_err;
-	__le32 agg_crc32_good;
-	__le32 agg_mpdu_cnt;
-	__le32 agg_cnt;
-	__le32 unsupport_mcs;
-} __packed;  /* STATISTICS_HT_RX_PHY_API_S_VER_1 */
-
-#define MAX_CHAINS 3
-
-struct mvm_statistics_tx_non_phy_agg {
-	__le32 ba_timeout;
-	__le32 ba_reschedule_frames;
-	__le32 scd_query_agg_frame_cnt;
-	__le32 scd_query_no_agg;
-	__le32 scd_query_agg;
-	__le32 scd_query_mismatch;
-	__le32 frame_not_ready;
-	__le32 underrun;
-	__le32 bt_prio_kill;
-	__le32 rx_ba_rsp_cnt;
-	__s8 txpower[MAX_CHAINS];
-	__s8 reserved;
-	__le32 reserved2;
-} __packed; /* STATISTICS_TX_NON_PHY_AGG_API_S_VER_1 */
-
-struct mvm_statistics_tx_channel_width {
-	__le32 ext_cca_narrow_ch20[1];
-	__le32 ext_cca_narrow_ch40[2];
-	__le32 ext_cca_narrow_ch80[3];
-	__le32 ext_cca_narrow_ch160[4];
-	__le32 last_tx_ch_width_indx;
-	__le32 rx_detected_per_ch_width[4];
-	__le32 success_per_ch_width[4];
-	__le32 fail_per_ch_width[4];
-}; /* STATISTICS_TX_CHANNEL_WIDTH_API_S_VER_1 */
-
-struct mvm_statistics_tx {
-	__le32 preamble_cnt;
-	__le32 rx_detected_cnt;
-	__le32 bt_prio_defer_cnt;
-	__le32 bt_prio_kill_cnt;
-	__le32 few_bytes_cnt;
-	__le32 cts_timeout;
-	__le32 ack_timeout;
-	__le32 expected_ack_cnt;
-	__le32 actual_ack_cnt;
-	__le32 dump_msdu_cnt;
-	__le32 burst_abort_next_frame_mismatch_cnt;
-	__le32 burst_abort_missing_next_frame_cnt;
-	__le32 cts_timeout_collision;
-	__le32 ack_or_ba_timeout_collision;
-	struct mvm_statistics_tx_non_phy_agg agg;
-	struct mvm_statistics_tx_channel_width channel_width;
-} __packed; /* STATISTICS_TX_API_S_VER_4 */
-
-
-struct mvm_statistics_bt_activity {
-	__le32 hi_priority_tx_req_cnt;
-	__le32 hi_priority_tx_denied_cnt;
-	__le32 lo_priority_tx_req_cnt;
-	__le32 lo_priority_tx_denied_cnt;
-	__le32 hi_priority_rx_req_cnt;
-	__le32 hi_priority_rx_denied_cnt;
-	__le32 lo_priority_rx_req_cnt;
-	__le32 lo_priority_rx_denied_cnt;
-} __packed;  /* STATISTICS_BT_ACTIVITY_API_S_VER_1 */
-
-struct mvm_statistics_general {
-	struct mvm_statistics_general_common common;
-	__le32 beacon_filtered;
-	__le32 missed_beacons;
-	__s8 beacon_filter_average_energy;
-	__s8 beacon_filter_reason;
-	__s8 beacon_filter_current_energy;
-	__s8 beacon_filter_reserved;
-	__le32 beacon_filter_delta_time;
-	struct mvm_statistics_bt_activity bt_activity;
-} __packed; /* STATISTICS_GENERAL_API_S_VER_5 */
-
-struct mvm_statistics_rx {
-	struct mvm_statistics_rx_phy ofdm;
-	struct mvm_statistics_rx_phy cck;
-	struct mvm_statistics_rx_non_phy general;
-	struct mvm_statistics_rx_ht_phy ofdm_ht;
-} __packed; /* STATISTICS_RX_API_S_VER_3 */
-
-/*
- * STATISTICS_NOTIFICATION = 0x9d (notification only, not a command)
- *
- * By default, uCode issues this notification after receiving a beacon
- * while associated.  To disable this behavior, set DISABLE_NOTIF flag in the
- * REPLY_STATISTICS_CMD 0x9c, above.
- *
- * Statistics counters continue to increment beacon after beacon, but are
- * cleared when changing channels or when driver issues REPLY_STATISTICS_CMD
- * 0x9c with CLEAR_STATS bit set (see above).
- *
- * uCode also issues this notification during scans.  uCode clears statistics
- * appropriately so that each notification contains statistics for only the
- * one channel that has just been scanned.
- */
-
-struct iwl_notif_statistics { /* STATISTICS_NTFY_API_S_VER_8 */
-	__le32 flag;
-	struct mvm_statistics_rx rx;
-	struct mvm_statistics_tx tx;
-	struct mvm_statistics_general general;
-} __packed;
-
 /***********************************
  * Smart Fifo API
  ***********************************/
@@ -1589,7 +1411,7 @@ enum iwl_sf_scenario {
 #define SF_NUM_TIMEOUT_TYPES 2		/* Aging timer and Idle timer */
 
 /* smart FIFO default values */
-#define SF_W_MARK_SISO 4096
+#define SF_W_MARK_SISO 6144
 #define SF_W_MARK_MIMO2 8192
 #define SF_W_MARK_MIMO3 6144
 #define SF_W_MARK_LEGACY 4096
@@ -1654,61 +1476,177 @@ struct iwl_dts_measurement_notif {
 	__le32 voltage;
 } __packed; /* TEMPERATURE_MEASUREMENT_TRIGGER_NTFY_S */
 
+/***********************************
+ * TDLS API
+ ***********************************/
+
+/* Type of TDLS request */
+enum iwl_tdls_channel_switch_type {
+	TDLS_SEND_CHAN_SW_REQ = 0,
+	TDLS_SEND_CHAN_SW_RESP_AND_MOVE_CH,
+	TDLS_MOVE_CH,
+}; /* TDLS_STA_CHANNEL_SWITCH_CMD_TYPE_API_E_VER_1 */
+
 /**
- * enum iwl_scd_control - scheduler config command control flags
- * @IWL_SCD_CONTROL_RM_TID: remove TID from this queue
- * @IWL_SCD_CONTROL_SET_SSN: use the SSN and program it into HW
+ * Switch timing sub-element in a TDLS channel-switch command
+ * @frame_timestamp: GP2 timestamp of channel-switch request/response packet
+ *	received from peer
+ * @max_offchan_duration: What amount of microseconds out of a DTIM is given
+ *	to the TDLS off-channel communication. For instance if the DTIM is
+ *	200TU and the TDLS peer is to be given 25% of the time, the value
+ *	given will be 50TU, or 50 * 1024 if translated into microseconds.
+ * @switch_time: switch time the peer sent in its channel switch timing IE
+ * @switch_timout: switch timeout the peer sent in its channel switch timing IE
  */
-enum iwl_scd_control {
-	IWL_SCD_CONTROL_RM_TID	= BIT(4),
-	IWL_SCD_CONTROL_SET_SSN	= BIT(5),
-};
+struct iwl_tdls_channel_switch_timing {
+	__le32 frame_timestamp; /* GP2 time of peer packet Rx */
+	__le32 max_offchan_duration; /* given in micro-seconds */
+	__le32 switch_time; /* given in micro-seconds */
+	__le32 switch_timeout; /* given in micro-seconds */
+} __packed; /* TDLS_STA_CHANNEL_SWITCH_TIMING_DATA_API_S_VER_1 */
+
+#define IWL_TDLS_CH_SW_FRAME_MAX_SIZE 200
 
 /**
- * enum iwl_scd_flags - scheduler config command flags
- * @IWL_SCD_FLAGS_SHARE_TID: multiple TIDs map to this queue
- * @IWL_SCD_FLAGS_SHARE_RA: multiple RAs map to this queue
- * @IWL_SCD_FLAGS_DQA_ENABLED: DQA is enabled
- */
-enum iwl_scd_flags {
-	IWL_SCD_FLAGS_SHARE_TID		= BIT(0),
-	IWL_SCD_FLAGS_SHARE_RA		= BIT(1),
-	IWL_SCD_FLAGS_DQA_ENABLED	= BIT(2),
-};
-
-#define IWL_SCDQ_INVALID_STA	0xff
-
-/**
- * struct iwl_scd_txq_cfg_cmd - New txq hw scheduler config command
- * @token:	dialog token addba - unused legacy
- * @sta_id:	station id 4-bit
- * @tid:	TID 0..7
- * @scd_queue:	TFD queue num 0 .. 31
- * @enable:	1 queue enable, 0 queue disable
- * @aggregate:	1 aggregated queue, 0 otherwise
- * @tx_fifo:	tx fifo num 0..7
- * @window:	up to 64
- * @ssn:	starting seq num 12-bit
- * @control:	command control flags
- * @flags:	flags - see &enum iwl_scd_flags
+ * TDLS channel switch frame template
  *
- * Note that every time the command is sent, all parameters must
- * be filled with the exception of
- *  - the SSN, which is only used with @IWL_SCD_CONTROL_SET_SSN
- *  - the window, which is only relevant when starting aggregation
+ * A template representing a TDLS channel-switch request or response frame
+ *
+ * @switch_time_offset: offset to the channel switch timing IE in the template
+ * @tx_cmd: Tx parameters for the frame
+ * @data: frame data
  */
-struct iwl_scd_txq_cfg_cmd {
-	u8 token;
+struct iwl_tdls_channel_switch_frame {
+	__le32 switch_time_offset;
+	struct iwl_tx_cmd tx_cmd;
+	u8 data[IWL_TDLS_CH_SW_FRAME_MAX_SIZE];
+} __packed; /* TDLS_STA_CHANNEL_SWITCH_FRAME_API_S_VER_1 */
+
+/**
+ * TDLS channel switch command
+ *
+ * The command is sent to initiate a channel switch and also in response to
+ * incoming TDLS channel-switch request/response packets from remote peers.
+ *
+ * @switch_type: see &enum iwl_tdls_channel_switch_type
+ * @peer_sta_id: station id of TDLS peer
+ * @ci: channel we switch to
+ * @timing: timing related data for command
+ * @frame: channel-switch request/response template, depending to switch_type
+ */
+struct iwl_tdls_channel_switch_cmd {
+	u8 switch_type;
+	__le32 peer_sta_id;
+	struct iwl_fw_channel_info ci;
+	struct iwl_tdls_channel_switch_timing timing;
+	struct iwl_tdls_channel_switch_frame frame;
+} __packed; /* TDLS_STA_CHANNEL_SWITCH_CMD_API_S_VER_1 */
+
+/**
+ * TDLS channel switch start notification
+ *
+ * @status: non-zero on success
+ * @offchannel_duration: duration given in microseconds
+ * @sta_id: peer currently performing the channel-switch with
+ */
+struct iwl_tdls_channel_switch_notif {
+	__le32 status;
+	__le32 offchannel_duration;
+	__le32 sta_id;
+} __packed; /* TDLS_STA_CHANNEL_SWITCH_NTFY_API_S_VER_1 */
+
+/**
+ * TDLS station info
+ *
+ * @sta_id: station id of the TDLS peer
+ * @tx_to_peer_tid: TID reserved vs. the peer for FW based Tx
+ * @tx_to_peer_ssn: initial SSN the FW should use for Tx on its TID vs the peer
+ * @is_initiator: 1 if the peer is the TDLS link initiator, 0 otherwise
+ */
+struct iwl_tdls_sta_info {
 	u8 sta_id;
-	u8 tid;
-	u8 scd_queue;
-	u8 enable;
-	u8 aggregate;
-	u8 tx_fifo;
-	u8 window;
-	__le16 ssn;
-	u8 control;
-	u8 flags;
-} __packed;
+	u8 tx_to_peer_tid;
+	__le16 tx_to_peer_ssn;
+	__le32 is_initiator;
+} __packed; /* TDLS_STA_INFO_VER_1 */
+
+/**
+ * TDLS basic config command
+ *
+ * @id_and_color: MAC id and color being configured
+ * @tdls_peer_count: amount of currently connected TDLS peers
+ * @tx_to_ap_tid: TID reverved vs. the AP for FW based Tx
+ * @tx_to_ap_ssn: initial SSN the FW should use for Tx on its TID vs. the AP
+ * @sta_info: per-station info. Only the first tdls_peer_count entries are set
+ * @pti_req_data_offset: offset of network-level data for the PTI template
+ * @pti_req_tx_cmd: Tx parameters for PTI request template
+ * @pti_req_template: PTI request template data
+ */
+struct iwl_tdls_config_cmd {
+	__le32 id_and_color; /* mac id and color */
+	u8 tdls_peer_count;
+	u8 tx_to_ap_tid;
+	__le16 tx_to_ap_ssn;
+	struct iwl_tdls_sta_info sta_info[IWL_MVM_TDLS_STA_COUNT];
+
+	__le32 pti_req_data_offset;
+	struct iwl_tx_cmd pti_req_tx_cmd;
+	u8 pti_req_template[0];
+} __packed; /* TDLS_CONFIG_CMD_API_S_VER_1 */
+
+/**
+ * TDLS per-station config information from FW
+ *
+ * @sta_id: station id of the TDLS peer
+ * @tx_to_peer_last_seq: last sequence number used by FW during FW-based Tx to
+ *	the peer
+ */
+struct iwl_tdls_config_sta_info_res {
+	__le16 sta_id;
+	__le16 tx_to_peer_last_seq;
+} __packed; /* TDLS_STA_INFO_RSP_VER_1 */
+
+/**
+ * TDLS config information from FW
+ *
+ * @tx_to_ap_last_seq: last sequence number used by FW during FW-based Tx to AP
+ * @sta_info: per-station TDLS config information
+ */
+struct iwl_tdls_config_res {
+	__le32 tx_to_ap_last_seq;
+	struct iwl_tdls_config_sta_info_res sta_info[IWL_MVM_TDLS_STA_COUNT];
+} __packed; /* TDLS_CONFIG_RSP_API_S_VER_1 */
+
+#define TX_FIFO_MAX_NUM		8
+#define RX_FIFO_MAX_NUM		2
+
+/**
+ * Shared memory configuration information from the FW
+ *
+ * @shared_mem_addr: shared memory addr (pre 8000 HW set to 0x0 as MARBH is not
+ *	accessible)
+ * @shared_mem_size: shared memory size
+ * @sample_buff_addr: internal sample (mon/adc) buff addr (pre 8000 HW set to
+ *	0x0 as accessible only via DBGM RDAT)
+ * @sample_buff_size: internal sample buff size
+ * @txfifo_addr: start addr of TXF0 (excluding the context table 0.5KB), (pre
+ *	8000 HW set to 0x0 as not accessible)
+ * @txfifo_size: size of TXF0 ... TXF7
+ * @rxfifo_size: RXF1, RXF2 sizes. If there is no RXF2, it'll have a value of 0
+ * @page_buff_addr: used by UMAC and performance debug (page miss analysis),
+ *	when paging is not supported this should be 0
+ * @page_buff_size: size of %page_buff_addr
+ */
+struct iwl_shared_mem_cfg {
+	__le32 shared_mem_addr;
+	__le32 shared_mem_size;
+	__le32 sample_buff_addr;
+	__le32 sample_buff_size;
+	__le32 txfifo_addr;
+	__le32 txfifo_size[TX_FIFO_MAX_NUM];
+	__le32 rxfifo_size[RX_FIFO_MAX_NUM];
+	__le32 page_buff_addr;
+	__le32 page_buff_size;
+} __packed; /* SHARED_MEM_ALLOC_API_S_VER_1 */
 
 #endif /* __fw_api_h__ */

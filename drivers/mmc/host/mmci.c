@@ -430,7 +430,6 @@ static void mmci_init_sg(struct mmci_host *host, struct mmc_data *data)
 static void mmci_dma_setup(struct mmci_host *host)
 {
 	const char *rxname, *txname;
-	dma_cap_mask_t mask;
 	struct variant_data *variant = host->variant;
 
 	host->dma_rx_channel = dma_request_slave_channel(mmc_dev(host->mmc), "rx");
@@ -438,10 +437,6 @@ static void mmci_dma_setup(struct mmci_host *host)
 
 	/* initialize pre request cookie */
 	host->next_data.cookie = 1;
-
-	/* Try to acquire a generic DMA engine slave channel */
-	dma_cap_zero(mask);
-	dma_cap_set(DMA_SLAVE, mask);
 
 	/*
 	 * If only an RX channel is specified, the driver will
@@ -736,8 +731,15 @@ static void mmci_post_request(struct mmc_host *mmc, struct mmc_request *mrq,
 			chan = host->dma_tx_channel;
 		dmaengine_terminate_all(chan);
 
+		if (host->dma_desc_current == next->dma_desc)
+			host->dma_desc_current = NULL;
+
+		if (host->dma_current == next->dma_chan)
+			host->dma_current = NULL;
+
 		next->dma_desc = NULL;
 		next->dma_chan = NULL;
+		data->host_cookie = 0;
 	}
 }
 
@@ -1732,10 +1734,10 @@ static int mmci_probe(struct amba_device *dev,
 
 	pm_runtime_set_autosuspend_delay(&dev->dev, 50);
 	pm_runtime_use_autosuspend(&dev->dev);
-	pm_runtime_put(&dev->dev);
 
 	mmc_add_host(mmc);
 
+	pm_runtime_put(&dev->dev);
 	return 0;
 
  clk_disable:
@@ -1843,7 +1845,7 @@ static int mmci_runtime_resume(struct device *dev)
 static const struct dev_pm_ops mmci_dev_pm_ops = {
 	SET_SYSTEM_SLEEP_PM_OPS(pm_runtime_force_suspend,
 				pm_runtime_force_resume)
-	SET_PM_RUNTIME_PM_OPS(mmci_runtime_suspend, mmci_runtime_resume, NULL)
+	SET_RUNTIME_PM_OPS(mmci_runtime_suspend, mmci_runtime_resume, NULL)
 };
 
 static struct amba_id mmci_ids[] = {

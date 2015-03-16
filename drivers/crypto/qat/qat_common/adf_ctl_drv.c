@@ -52,6 +52,7 @@
 #include <linux/pci.h>
 #include <linux/cdev.h>
 #include <linux/uaccess.h>
+#include <linux/crypto.h>
 
 #include "adf_accel_devices.h"
 #include "adf_common_drv.h"
@@ -281,6 +282,8 @@ static int adf_ctl_stop_devices(uint32_t id)
 			if (adf_dev_stop(accel_dev)) {
 				pr_err("QAT: Failed to stop qat_dev%d\n", id);
 				ret = -EFAULT;
+			} else {
+				adf_dev_shutdown(accel_dev);
 			}
 		}
 	}
@@ -342,7 +345,9 @@ static int adf_ctl_ioctl_dev_start(struct file *fp, unsigned int cmd,
 	if (!adf_dev_started(accel_dev)) {
 		pr_info("QAT: Starting acceleration device qat_dev%d.\n",
 			ctl_data->device_id);
-		ret = adf_dev_start(accel_dev);
+		ret = adf_dev_init(accel_dev);
+		if (!ret)
+			ret = adf_dev_start(accel_dev);
 	} else {
 		pr_info("QAT: Acceleration device qat_dev%d already started.\n",
 			ctl_data->device_id);
@@ -350,6 +355,7 @@ static int adf_ctl_ioctl_dev_start(struct file *fp, unsigned int cmd,
 	if (ret) {
 		pr_err("QAT: Failed to start qat_dev%d\n", ctl_data->device_id);
 		adf_dev_stop(accel_dev);
+		adf_dev_shutdown(accel_dev);
 	}
 out:
 	kfree(ctl_data);
@@ -487,4 +493,4 @@ module_exit(adf_unregister_ctl_device_driver);
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_AUTHOR("Intel");
 MODULE_DESCRIPTION("Intel(R) QuickAssist Technology");
-MODULE_ALIAS("intel_qat");
+MODULE_ALIAS_CRYPTO("intel_qat");

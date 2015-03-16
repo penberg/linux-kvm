@@ -19,8 +19,7 @@
 /*
  * Driver: ni_6527
  * Description: National Instruments 6527
- * Devices: (National Instruments) PCI-6527 [pci-6527]
- *          (National Instruments) PXI-6527 [pxi-6527]
+ * Devices: [National Instruments] PCI-6527 (pci-6527), PXI-6527 (pxi-6527)
  * Author: David A. Schleef <ds@schleef.org>
  * Updated: Sat, 25 Jan 2003 13:24:40 -0800
  * Status: works
@@ -208,9 +207,8 @@ static irqreturn_t ni6527_interrupt(int irq, void *d)
 		return IRQ_NONE;
 
 	if (status & NI6527_STATUS_EDGE) {
-		comedi_buf_put(s, 0);
-		s->async->events |= COMEDI_CB_EOS;
-		comedi_event(dev, s);
+		comedi_buf_write_samples(s, &s->state, 1);
+		comedi_handle_events(dev, s);
 	}
 
 	writeb(NI6527_CLR_IRQS, dev->mmio + NI6527_CLR_REG);
@@ -237,9 +235,6 @@ static int ni6527_intr_cmdtest(struct comedi_device *dev,
 
 	/* Step 2a : make sure trigger sources are unique */
 	/* Step 2b : and mutually compatible */
-
-	if (err)
-		return 2;
 
 	/* Step 3: check if arguments are trivially valid */
 

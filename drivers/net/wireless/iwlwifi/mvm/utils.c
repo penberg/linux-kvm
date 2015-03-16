@@ -432,7 +432,7 @@ static void iwl_mvm_dump_umac_error_log(struct iwl_mvm *mvm)
 			mvm->status, table.valid);
 	}
 
-	IWL_ERR(mvm, "0x%08X | %-28s\n", table.error_id,
+	IWL_ERR(mvm, "0x%08X | %s\n", table.error_id,
 		desc_lookup(table.error_id));
 	IWL_ERR(mvm, "0x%08X | umac branchlink1\n", table.blink1);
 	IWL_ERR(mvm, "0x%08X | umac branchlink2\n", table.blink2);
@@ -531,49 +531,50 @@ void iwl_mvm_dump_nic_error_log(struct iwl_mvm *mvm)
 }
 
 void iwl_mvm_enable_txq(struct iwl_mvm *mvm, int queue, u16 ssn,
-			const struct iwl_trans_txq_scd_cfg *cfg)
+			const struct iwl_trans_txq_scd_cfg *cfg,
+			unsigned int wdg_timeout)
 {
-	if (iwl_mvm_is_dqa_supported(mvm)) {
-		struct iwl_scd_txq_cfg_cmd cmd = {
-			.scd_queue = queue,
-			.enable = 1,
-			.window = cfg->frame_limit,
-			.sta_id = cfg->sta_id,
-			.ssn = cpu_to_le16(ssn),
-			.tx_fifo = cfg->fifo,
-			.aggregate = cfg->aggregate,
-			.flags = IWL_SCD_FLAGS_DQA_ENABLED,
-			.tid = cfg->tid,
-			.control = IWL_SCD_CONTROL_SET_SSN,
-		};
-		int ret = iwl_mvm_send_cmd_pdu(mvm, SCD_QUEUE_CFG, 0,
-					       sizeof(cmd), &cmd);
-		if (ret)
-			IWL_ERR(mvm,
-				"Failed to configure queue %d on FIFO %d\n",
-				queue, cfg->fifo);
+	struct iwl_scd_txq_cfg_cmd cmd = {
+		.scd_queue = queue,
+		.enable = 1,
+		.window = cfg->frame_limit,
+		.sta_id = cfg->sta_id,
+		.ssn = cpu_to_le16(ssn),
+		.tx_fifo = cfg->fifo,
+		.aggregate = cfg->aggregate,
+		.tid = cfg->tid,
+	};
+
+	if (!iwl_mvm_is_scd_cfg_supported(mvm)) {
+		iwl_trans_txq_enable_cfg(mvm->trans, queue, ssn, cfg,
+					 wdg_timeout);
+		return;
 	}
 
-	iwl_trans_txq_enable_cfg(mvm->trans, queue, ssn,
-				 iwl_mvm_is_dqa_supported(mvm) ? NULL : cfg);
+	iwl_trans_txq_enable_cfg(mvm->trans, queue, ssn, NULL, wdg_timeout);
+	WARN(iwl_mvm_send_cmd_pdu(mvm, SCD_QUEUE_CFG, 0, sizeof(cmd), &cmd),
+	     "Failed to configure queue %d on FIFO %d\n", queue, cfg->fifo);
 }
 
-void iwl_mvm_disable_txq(struct iwl_mvm *mvm, int queue)
+void iwl_mvm_disable_txq(struct iwl_mvm *mvm, int queue, u8 flags)
 {
-	iwl_trans_txq_disable(mvm->trans, queue,
-			      !iwl_mvm_is_dqa_supported(mvm));
+	struct iwl_scd_txq_cfg_cmd cmd = {
+		.scd_queue = queue,
+		.enable = 0,
+	};
+	int ret;
 
-	if (iwl_mvm_is_dqa_supported(mvm)) {
-		struct iwl_scd_txq_cfg_cmd cmd = {
-			.scd_queue = queue,
-			.enable = 0,
-		};
-		int ret = iwl_mvm_send_cmd_pdu(mvm, SCD_QUEUE_CFG, CMD_ASYNC,
-					       sizeof(cmd), &cmd);
-		if (ret)
-			IWL_ERR(mvm, "Failed to disable queue %d (ret=%d)\n",
-				queue, ret);
+	if (!iwl_mvm_is_scd_cfg_supported(mvm)) {
+		iwl_trans_txq_disable(mvm->trans, queue, true);
+		return;
 	}
+
+	iwl_trans_txq_disable(mvm->trans, queue, false);
+	ret = iwl_mvm_send_cmd_pdu(mvm, SCD_QUEUE_CFG, flags,
+				   sizeof(cmd), &cmd);
+	if (ret)
+		IWL_ERR(mvm, "Failed to disable queue %d (ret=%d)\n",
+			queue, ret);
 }
 
 /**
@@ -620,7 +621,7 @@ void iwl_mvm_update_smps(struct iwl_mvm *mvm, struct ieee80211_vif *vif,
 	lockdep_assert_held(&mvm->mutex);
 
 	/* SMPS is irrelevant for NICs that don't have at least 2 RX antenna */
-	if (num_of_ant(mvm->fw->valid_rx_ant) == 1)
+	if (num_of_ant(iwl_mvm_get_valid_rx_ant(mvm)) == 1)
 		return;
 
 	if (vif->type == NL80211_IFTYPE_AP)
@@ -662,10 +663,10 @@ bool iwl_mvm_rx_diversity_allowed(struct iwl_mvm *mvm)
 
 	lockdep_assert_held(&mvm->mutex);
 
-	if (num_of_ant(mvm->fw->valid_rx_ant) == 1)
+	if (num_of_ant(iwl_mvm_get_valid_rx_ant(mvm)) == 1)
 		return false;
 
-	if (!mvm->cfg->rx_with_siso_diversity)
+	if (mvm->cfg->rx_with_siso_diversity)
 		return false;
 
 	ieee80211_iterate_active_interfaces_atomic(
@@ -733,4 +734,41 @@ bool iwl_mvm_is_idle(struct iwl_mvm *mvm)
 			iwl_mvm_idle_iter, &idle);
 
 	return idle;
+}
+
+struct iwl_bss_iter_data {
+	struct ieee80211_vif *vif;
+	bool error;
+};
+
+static void iwl_mvm_bss_iface_iterator(void *_data, u8 *mac,
+				       struct ieee80211_vif *vif)
+{
+	struct iwl_bss_iter_data *data = _data;
+
+	if (vif->type != NL80211_IFTYPE_STATION || vif->p2p)
+		return;
+
+	if (data->vif) {
+		data->error = true;
+		return;
+	}
+
+	data->vif = vif;
+}
+
+struct ieee80211_vif *iwl_mvm_get_bss_vif(struct iwl_mvm *mvm)
+{
+	struct iwl_bss_iter_data bss_iter_data = {};
+
+	ieee80211_iterate_active_interfaces_atomic(
+		mvm->hw, IEEE80211_IFACE_ITER_NORMAL,
+		iwl_mvm_bss_iface_iterator, &bss_iter_data);
+
+	if (bss_iter_data.error) {
+		IWL_ERR(mvm, "More than one managed interface active!\n");
+		return ERR_PTR(-EINVAL);
+	}
+
+	return bss_iter_data.vif;
 }

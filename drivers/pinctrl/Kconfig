@@ -67,18 +67,6 @@ config PINCTRL_AT91
 	help
 	  Say Y here to enable the at91 pinctrl driver
 
-config PINCTRL_BAYTRAIL
-	bool "Intel Baytrail GPIO pin control"
-	depends on GPIOLIB && ACPI && X86
-	select GPIOLIB_IRQCHIP
-	help
-	  driver for memory mapped GPIO functionality on Intel Baytrail
-	  platforms. Supports 3 banks with 102, 28 and 44 gpios.
-	  Most pins are usually muxed to some other functionality by firmware,
-	  so only a small amount is available for gpio use.
-
-	  Requires ACPI device enumeration code to set up a platform device.
-
 config PINCTRL_BCM2835
 	bool
 	select PINMUX
@@ -108,6 +96,14 @@ config PINCTRL_FALCON
 	depends on SOC_FALCON
 	depends on PINCTRL_LANTIQ
 
+config PINCTRL_MESON
+	bool
+	select PINMUX
+	select PINCONF
+	select GENERIC_PINCONF
+	select OF_GPIO
+	select REGMAP_MMIO
+
 config PINCTRL_ROCKCHIP
 	bool
 	select PINMUX
@@ -125,7 +121,7 @@ config PINCTRL_SINGLE
 	  This selects the device tree based generic pinctrl driver.
 
 config PINCTRL_SIRF
-	bool "CSR SiRFprimaII/SiRFmarco pin controller driver"
+	bool "CSR SiRFprimaII pin controller driver"
 	depends on ARCH_SIRF
 	select PINMUX
 	select GPIOLIB_IRQCHIP
@@ -203,8 +199,17 @@ config PINCTRL_PALMAS
 	  open drain configuration for the Palmas series devices like
 	  TPS65913, TPS80036 etc.
 
+config PINCTRL_ZYNQ
+	bool "Pinctrl driver for Xilinx Zynq"
+	depends on ARCH_ZYNQ
+	select PINMUX
+	select GENERIC_PINCONF
+	help
+	  This selectes the pinctrl driver for Xilinx Zynq.
+
 source "drivers/pinctrl/berlin/Kconfig"
 source "drivers/pinctrl/freescale/Kconfig"
+source "drivers/pinctrl/intel/Kconfig"
 source "drivers/pinctrl/mvebu/Kconfig"
 source "drivers/pinctrl/nomadik/Kconfig"
 source "drivers/pinctrl/qcom/Kconfig"
