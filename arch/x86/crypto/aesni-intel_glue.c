@@ -43,9 +43,6 @@
 #include <asm/crypto/glue_helper.h>
 #endif
 
-#if defined(CONFIG_CRYPTO_PCBC) || defined(CONFIG_CRYPTO_PCBC_MODULE)
-#define HAS_PCBC
-#endif
 
 /* This data is stored at the end of the crypto_tfm struct.
  * It's a type of per "session" data storage location.
@@ -186,7 +183,8 @@ static void aesni_gcm_enc_avx(void *ctx, u8 *out,
 			u8 *hash_subkey, const u8 *aad, unsigned long aad_len,
 			u8 *auth_tag, unsigned long auth_tag_len)
 {
-	if (plaintext_len < AVX_GEN2_OPTSIZE) {
+        struct crypto_aes_ctx *aes_ctx = (struct crypto_aes_ctx*)ctx;
+	if ((plaintext_len < AVX_GEN2_OPTSIZE) || (aes_ctx-> key_length != AES_KEYSIZE_128)){
 		aesni_gcm_enc(ctx, out, in, plaintext_len, iv, hash_subkey, aad,
 				aad_len, auth_tag, auth_tag_len);
 	} else {
@@ -201,7 +199,8 @@ static void aesni_gcm_dec_avx(void *ctx, u8 *out,
 			u8 *hash_subkey, const u8 *aad, unsigned long aad_len,
 			u8 *auth_tag, unsigned long auth_tag_len)
 {
-	if (ciphertext_len < AVX_GEN2_OPTSIZE) {
+        struct crypto_aes_ctx *aes_ctx = (struct crypto_aes_ctx*)ctx;
+	if ((ciphertext_len < AVX_GEN2_OPTSIZE) || (aes_ctx-> key_length != AES_KEYSIZE_128)) {
 		aesni_gcm_dec(ctx, out, in, ciphertext_len, iv, hash_subkey, aad,
 				aad_len, auth_tag, auth_tag_len);
 	} else {
@@ -235,7 +234,8 @@ static void aesni_gcm_enc_avx2(void *ctx, u8 *out,
 			u8 *hash_subkey, const u8 *aad, unsigned long aad_len,
 			u8 *auth_tag, unsigned long auth_tag_len)
 {
-	if (plaintext_len < AVX_GEN2_OPTSIZE) {
+       struct crypto_aes_ctx *aes_ctx = (struct crypto_aes_ctx*)ctx;
+	if ((plaintext_len < AVX_GEN2_OPTSIZE) || (aes_ctx-> key_length != AES_KEYSIZE_128)) {
 		aesni_gcm_enc(ctx, out, in, plaintext_len, iv, hash_subkey, aad,
 				aad_len, auth_tag, auth_tag_len);
 	} else if (plaintext_len < AVX_GEN4_OPTSIZE) {
@@ -254,7 +254,8 @@ static void aesni_gcm_dec_avx2(void *ctx, u8 *out,
 			u8 *hash_subkey, const u8 *aad, unsigned long aad_len,
 			u8 *auth_tag, unsigned long auth_tag_len)
 {
-	if (ciphertext_len < AVX_GEN2_OPTSIZE) {
+       struct crypto_aes_ctx *aes_ctx = (struct crypto_aes_ctx*)ctx;
+	if ((ciphertext_len < AVX_GEN2_OPTSIZE) || (aes_ctx-> key_length != AES_KEYSIZE_128)) {
 		aesni_gcm_dec(ctx, out, in, ciphertext_len, iv, hash_subkey,
 				aad, aad_len, auth_tag, auth_tag_len);
 	} else if (ciphertext_len < AVX_GEN4_OPTSIZE) {
@@ -515,7 +516,7 @@ static int ctr_crypt(struct blkcipher_desc *desc,
 	kernel_fpu_begin();
 	while ((nbytes = walk.nbytes) >= AES_BLOCK_SIZE) {
 		aesni_ctr_enc_tfm(ctx, walk.dst.virt.addr, walk.src.virt.addr,
-				  nbytes & AES_BLOCK_MASK, walk.iv);
+			              nbytes & AES_BLOCK_MASK, walk.iv);
 		nbytes &= AES_BLOCK_SIZE - 1;
 		err = blkcipher_walk_done(desc, &walk, nbytes);
 	}
@@ -547,7 +548,7 @@ static int ablk_ctr_init(struct crypto_tfm *tfm)
 
 #endif
 
-#ifdef HAS_PCBC
+#if IS_ENABLED(CONFIG_CRYPTO_PCBC)
 static int ablk_pcbc_init(struct crypto_tfm *tfm)
 {
 	return ablk_init_common(tfm, "fpu(pcbc(__driver-aes-aesni))");
@@ -906,7 +907,8 @@ static int rfc4106_set_key(struct crypto_aead *parent, const u8 *key,
 	}
 	/*Account for 4 byte nonce at the end.*/
 	key_len -= 4;
-	if (key_len != AES_KEYSIZE_128) {
+	if (key_len != AES_KEYSIZE_128 && key_len != AES_KEYSIZE_192 &&
+	    key_len != AES_KEYSIZE_256) {
 		crypto_tfm_set_flags(tfm, CRYPTO_TFM_RES_BAD_KEY_LEN);
 		return -EINVAL;
 	}
@@ -1017,6 +1019,7 @@ static int __driver_rfc4106_encrypt(struct aead_request *req)
 	__be32 counter = cpu_to_be32(1);
 	struct crypto_aead *tfm = crypto_aead_reqtfm(req);
 	struct aesni_rfc4106_gcm_ctx *ctx = aesni_rfc4106_gcm_ctx_get(tfm);
+	u32 key_len = ctx->aes_key_expanded.key_length;
 	void *aes_ctx = &(ctx->aes_key_expanded);
 	unsigned long auth_tag_len = crypto_aead_authsize(tfm);
 	u8 iv_tab[16+AESNI_ALIGN];
@@ -1031,6 +1034,13 @@ static int __driver_rfc4106_encrypt(struct aead_request *req)
 	/* to 8 or 12 bytes */
 	if (unlikely(req->assoclen != 8 && req->assoclen != 12))
 		return -EINVAL;
+	if (unlikely(auth_tag_len != 8 && auth_tag_len != 12 && auth_tag_len != 16))
+	        return -EINVAL;
+	if (unlikely(key_len != AES_KEYSIZE_128 &&
+	             key_len != AES_KEYSIZE_192 &&
+	             key_len != AES_KEYSIZE_256))
+	        return -EINVAL;
+
 	/* IV below built */
 	for (i = 0; i < 4; i++)
 		*(iv+i) = ctx->nonce[i];
@@ -1095,6 +1105,7 @@ static int __driver_rfc4106_decrypt(struct aead_request *req)
 	int retval = 0;
 	struct crypto_aead *tfm = crypto_aead_reqtfm(req);
 	struct aesni_rfc4106_gcm_ctx *ctx = aesni_rfc4106_gcm_ctx_get(tfm);
+	u32 key_len = ctx->aes_key_expanded.key_length;
 	void *aes_ctx = &(ctx->aes_key_expanded);
 	unsigned long auth_tag_len = crypto_aead_authsize(tfm);
 	u8 iv_and_authTag[32+AESNI_ALIGN];
@@ -1108,6 +1119,13 @@ static int __driver_rfc4106_decrypt(struct aead_request *req)
 	if (unlikely((req->cryptlen < auth_tag_len) ||
 		(req->assoclen != 8 && req->assoclen != 12)))
 		return -EINVAL;
+	if (unlikely(auth_tag_len != 8 && auth_tag_len != 12 && auth_tag_len != 16))
+	        return -EINVAL;
+	if (unlikely(key_len != AES_KEYSIZE_128 &&
+	             key_len != AES_KEYSIZE_192 &&
+	             key_len != AES_KEYSIZE_256))
+	        return -EINVAL;
+
 	/* Assuming we are supporting rfc4106 64-bit extended */
 	/* sequence numbers We need to have the AAD length */
 	/* equal to 8 or 12 bytes */
@@ -1377,7 +1395,7 @@ static struct crypto_alg aesni_algs[] = { {
 		},
 	},
 #endif
-#ifdef HAS_PCBC
+#if IS_ENABLED(CONFIG_CRYPTO_PCBC)
 }, {
 	.cra_name		= "pcbc(aes)",
 	.cra_driver_name	= "pcbc-aes-aesni",
@@ -1550,4 +1568,4 @@ module_exit(aesni_exit);
 
 MODULE_DESCRIPTION("Rijndael (AES) Cipher Algorithm, Intel AES-NI instructions optimized");
 MODULE_LICENSE("GPL");
-MODULE_ALIAS("aes");
+MODULE_ALIAS_CRYPTO("aes");

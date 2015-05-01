@@ -81,6 +81,7 @@ int sysctl_tcp_window_scaling __read_mostly = 1;
 int sysctl_tcp_sack __read_mostly = 1;
 int sysctl_tcp_fack __read_mostly = 1;
 int sysctl_tcp_reordering __read_mostly = TCP_FASTRETRANS_THRESH;
+int sysctl_tcp_max_reordering __read_mostly = 300;
 EXPORT_SYMBOL(sysctl_tcp_reordering);
 int sysctl_tcp_dsack __read_mostly = 1;
 int sysctl_tcp_app_win __read_mostly = 31;
@@ -99,6 +100,7 @@ int sysctl_tcp_thin_dupack __read_mostly;
 
 int sysctl_tcp_moderate_rcvbuf __read_mostly = 1;
 int sysctl_tcp_early_retrans __read_mostly = 3;
+int sysctl_tcp_invalid_ratelimit __read_mostly = HZ/2;
 
 #define FLAG_DATA		0x01 /* Incoming frame contained data.		*/
 #define FLAG_WIN_UPDATE		0x02 /* Incoming ACK was a window update.	*/
@@ -833,7 +835,7 @@ static void tcp_update_reordering(struct sock *sk, const int metric,
 	if (metric > tp->reordering) {
 		int mib_idx;
 
-		tp->reordering = min(TCP_MAX_REORDERING, metric);
+		tp->reordering = min(sysctl_tcp_max_reordering, metric);
 
 		/* This exciting event is worth to be remembered. 8) */
 		if (ts)
@@ -3182,8 +3184,10 @@ static int tcp_clean_rtx_queue(struct sock *sk, int prior_fackets,
 
 		tp->fackets_out -= min(pkts_acked, tp->fackets_out);
 
-		if (ca_ops->pkts_acked)
-			ca_ops->pkts_acked(sk, pkts_acked, ca_seq_rtt_us);
+		if (ca_ops->pkts_acked) {
+			long rtt_us = min_t(ulong, ca_seq_rtt_us, sack_rtt_us);
+			ca_ops->pkts_acked(sk, pkts_acked, rtt_us);
+		}
 
 	} else if (skb && rtt_update && sack_rtt_us >= 0 &&
 		   sack_rtt_us > skb_mstamp_us_delta(&now, &skb->skb_mstamp)) {
@@ -3318,13 +3322,22 @@ static int tcp_ack_update_window(struct sock *sk, const struct sk_buff *skb, u32
 }
 
 /* RFC 5961 7 [ACK Throttling] */
-static void tcp_send_challenge_ack(struct sock *sk)
+static void tcp_send_challenge_ack(struct sock *sk, const struct sk_buff *skb)
 {
 	/* unprotected vars, we dont care of overwrites */
 	static u32 challenge_timestamp;
 	static unsigned int challenge_count;
-	u32 now = jiffies / HZ;
+	struct tcp_sock *tp = tcp_sk(sk);
+	u32 now;
 
+	/* First check our per-socket dupack rate limit. */
+	if (tcp_oow_rate_limited(sock_net(sk), skb,
+				 LINUX_MIB_TCPACKSKIPPEDCHALLENGE,
+				 &tp->last_oow_ack_time))
+		return;
+
+	/* Then check the check host-wide RFC 5961 rate limit. */
+	now = jiffies / HZ;
 	if (now != challenge_timestamp) {
 		challenge_timestamp = now;
 		challenge_count = 0;
@@ -3357,34 +3370,34 @@ static void tcp_replace_ts_recent(struct tcp_sock *tp, u32 seq)
 }
 
 /* This routine deals with acks during a TLP episode.
+ * We mark the end of a TLP episode on receiving TLP dupack or when
+ * ack is after tlp_high_seq.
  * Ref: loss detection algorithm in draft-dukkipati-tcpm-tcp-loss-probe.
  */
 static void tcp_process_tlp_ack(struct sock *sk, u32 ack, int flag)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
-	bool is_tlp_dupack = (ack == tp->tlp_high_seq) &&
-			     !(flag & (FLAG_SND_UNA_ADVANCED |
-				       FLAG_NOT_DUP | FLAG_DATA_SACKED));
 
-	/* Mark the end of TLP episode on receiving TLP dupack or when
-	 * ack is after tlp_high_seq.
-	 */
-	if (is_tlp_dupack) {
-		tp->tlp_high_seq = 0;
+	if (before(ack, tp->tlp_high_seq))
 		return;
-	}
 
-	if (after(ack, tp->tlp_high_seq)) {
+	if (flag & FLAG_DSACKING_ACK) {
+		/* This DSACK means original and TLP probe arrived; no loss */
 		tp->tlp_high_seq = 0;
-		/* Don't reduce cwnd if DSACK arrives for TLP retrans. */
-		if (!(flag & FLAG_DSACKING_ACK)) {
-			tcp_init_cwnd_reduction(sk);
-			tcp_set_ca_state(sk, TCP_CA_CWR);
-			tcp_end_cwnd_reduction(sk);
-			tcp_try_keep_open(sk);
-			NET_INC_STATS_BH(sock_net(sk),
-					 LINUX_MIB_TCPLOSSPROBERECOVERY);
-		}
+	} else if (after(ack, tp->tlp_high_seq)) {
+		/* ACK advances: there was a loss, so reduce cwnd. Reset
+		 * tlp_high_seq in tcp_init_cwnd_reduction()
+		 */
+		tcp_init_cwnd_reduction(sk);
+		tcp_set_ca_state(sk, TCP_CA_CWR);
+		tcp_end_cwnd_reduction(sk);
+		tcp_try_keep_open(sk);
+		NET_INC_STATS_BH(sock_net(sk),
+				 LINUX_MIB_TCPLOSSPROBERECOVERY);
+	} else if (!(flag & (FLAG_SND_UNA_ADVANCED |
+			     FLAG_NOT_DUP | FLAG_DATA_SACKED))) {
+		/* Pure dupack: original and TLP probe arrived; no loss */
+		tp->tlp_high_seq = 0;
 	}
 }
 
@@ -3420,7 +3433,7 @@ static int tcp_ack(struct sock *sk, const struct sk_buff *skb, int flag)
 	if (before(ack, prior_snd_una)) {
 		/* RFC 5961 5.2 [Blind Data Injection Attack].[Mitigation] */
 		if (before(ack, prior_snd_una - tp->max_window)) {
-			tcp_send_challenge_ack(sk);
+			tcp_send_challenge_ack(sk, skb);
 			return -1;
 		}
 		goto old_ack;
@@ -4367,7 +4380,7 @@ int tcp_send_rcvq(struct sock *sk, struct msghdr *msg, size_t size)
 	if (tcp_try_rmem_schedule(sk, skb, skb->truesize))
 		goto err_free;
 
-	if (memcpy_fromiovec(skb_put(skb, size), msg->msg_iov, size))
+	if (memcpy_from_msg(skb_put(skb, size), msg, size))
 		goto err_free;
 
 	TCP_SKB_CB(skb)->seq = tcp_sk(sk)->rcv_nxt;
@@ -4420,7 +4433,7 @@ static void tcp_data_queue(struct sock *sk, struct sk_buff *skb)
 			__set_current_state(TASK_RUNNING);
 
 			local_bh_enable();
-			if (!skb_copy_datagram_iovec(skb, 0, tp->ucopy.iov, chunk)) {
+			if (!skb_copy_datagram_msg(skb, 0, tp->ucopy.msg, chunk)) {
 				tp->ucopy.len -= chunk;
 				tp->copied_seq += chunk;
 				eaten = (chunk == skb->len);
@@ -4757,7 +4770,7 @@ static bool tcp_should_expand_sndbuf(const struct sock *sk)
 		return false;
 
 	/* If we filled the congestion window, do not expand.  */
-	if (tp->packets_out >= tp->snd_cwnd)
+	if (tcp_packets_in_flight(tp) >= tp->snd_cwnd)
 		return false;
 
 	return true;
@@ -4940,10 +4953,9 @@ static int tcp_copy_to_iovec(struct sock *sk, struct sk_buff *skb, int hlen)
 
 	local_bh_enable();
 	if (skb_csum_unnecessary(skb))
-		err = skb_copy_datagram_iovec(skb, hlen, tp->ucopy.iov, chunk);
+		err = skb_copy_datagram_msg(skb, hlen, tp->ucopy.msg, chunk);
 	else
-		err = skb_copy_and_csum_datagram_iovec(skb, hlen,
-						       tp->ucopy.iov);
+		err = skb_copy_and_csum_datagram_msg(skb, hlen, tp->ucopy.msg);
 
 	if (!err) {
 		tp->ucopy.len -= chunk;
@@ -4990,7 +5002,10 @@ static bool tcp_validate_incoming(struct sock *sk, struct sk_buff *skb,
 	    tcp_paws_discard(sk, skb)) {
 		if (!th->rst) {
 			NET_INC_STATS_BH(sock_net(sk), LINUX_MIB_PAWSESTABREJECTED);
-			tcp_send_dupack(sk, skb);
+			if (!tcp_oow_rate_limited(sock_net(sk), skb,
+						  LINUX_MIB_TCPACKSKIPPEDPAWS,
+						  &tp->last_oow_ack_time))
+				tcp_send_dupack(sk, skb);
 			goto discard;
 		}
 		/* Reset is accepted even if it did not pass PAWS. */
@@ -5007,7 +5022,10 @@ static bool tcp_validate_incoming(struct sock *sk, struct sk_buff *skb,
 		if (!th->rst) {
 			if (th->syn)
 				goto syn_challenge;
-			tcp_send_dupack(sk, skb);
+			if (!tcp_oow_rate_limited(sock_net(sk), skb,
+						  LINUX_MIB_TCPACKSKIPPEDSEQ,
+						  &tp->last_oow_ack_time))
+				tcp_send_dupack(sk, skb);
 		}
 		goto discard;
 	}
@@ -5023,21 +5041,21 @@ static bool tcp_validate_incoming(struct sock *sk, struct sk_buff *skb,
 		if (TCP_SKB_CB(skb)->seq == tp->rcv_nxt)
 			tcp_reset(sk);
 		else
-			tcp_send_challenge_ack(sk);
+			tcp_send_challenge_ack(sk, skb);
 		goto discard;
 	}
 
 	/* step 3: check security and precedence [ignored] */
 
 	/* step 4: Check for a SYN
-	 * RFC 5691 4.2 : Send a challenge ack
+	 * RFC 5961 4.2 : Send a challenge ack
 	 */
 	if (th->syn) {
 syn_challenge:
 		if (syn_inerr)
 			TCP_INC_STATS_BH(sock_net(sk), TCP_MIB_INERRS);
 		NET_INC_STATS_BH(sock_net(sk), LINUX_MIB_TCPSYNCHALLENGE);
-		tcp_send_challenge_ack(sk);
+		tcp_send_challenge_ack(sk, skb);
 		goto discard;
 	}
 
@@ -5853,12 +5871,12 @@ static inline void pr_drop_req(struct request_sock *req, __u16 port, int family)
 	struct inet_request_sock *ireq = inet_rsk(req);
 
 	if (family == AF_INET)
-		LIMIT_NETDEBUG(KERN_DEBUG pr_fmt("drop open request from %pI4/%u\n"),
-			       &ireq->ir_rmt_addr, port);
+		net_dbg_ratelimited("drop open request from %pI4/%u\n",
+				    &ireq->ir_rmt_addr, port);
 #if IS_ENABLED(CONFIG_IPV6)
 	else if (family == AF_INET6)
-		LIMIT_NETDEBUG(KERN_DEBUG pr_fmt("drop open request from %pI6/%u\n"),
-			       &ireq->ir_v6_rmt_addr, port);
+		net_dbg_ratelimited("drop open request from %pI6/%u\n",
+				    &ireq->ir_v6_rmt_addr, port);
 #endif
 }
 
@@ -5867,32 +5885,30 @@ static inline void pr_drop_req(struct request_sock *req, __u16 port, int family)
  * If we receive a SYN packet with these bits set, it means a
  * network is playing bad games with TOS bits. In order to
  * avoid possible false congestion notifications, we disable
- * TCP ECN negociation.
+ * TCP ECN negotiation.
  *
  * Exception: tcp_ca wants ECN. This is required for DCTCP
- * congestion control; it requires setting ECT on all packets,
- * including SYN. We inverse the test in this case: If our
- * local socket wants ECN, but peer only set ece/cwr (but not
- * ECT in IP header) its probably a non-DCTCP aware sender.
+ * congestion control: Linux DCTCP asserts ECT on all packets,
+ * including SYN, which is most optimal solution; however,
+ * others, such as FreeBSD do not.
  */
 static void tcp_ecn_create_request(struct request_sock *req,
 				   const struct sk_buff *skb,
-				   const struct sock *listen_sk)
+				   const struct sock *listen_sk,
+				   const struct dst_entry *dst)
 {
 	const struct tcphdr *th = tcp_hdr(skb);
 	const struct net *net = sock_net(listen_sk);
 	bool th_ecn = th->ece && th->cwr;
-	bool ect, need_ecn;
+	bool ect, ecn_ok;
 
 	if (!th_ecn)
 		return;
 
 	ect = !INET_ECN_is_not_ect(TCP_SKB_CB(skb)->ip_dsfield);
-	need_ecn = tcp_ca_needs_ecn(listen_sk);
+	ecn_ok = net->ipv4.sysctl_tcp_ecn || dst_feature(dst, RTAX_FEATURE_ECN);
 
-	if (!ect && !need_ecn && net->ipv4.sysctl_tcp_ecn)
-		inet_rsk(req)->ecn_ok = 1;
-	else if (ect && need_ecn)
+	if ((!ect && ecn_ok) || tcp_ca_needs_ecn(listen_sk))
 		inet_rsk(req)->ecn_ok = 1;
 }
 
@@ -5955,13 +5971,7 @@ int tcp_conn_request(struct request_sock_ops *rsk_ops,
 	if (security_inet_conn_request(sk, skb, req))
 		goto drop_and_free;
 
-	if (!want_cookie || tmp_opt.tstamp_ok)
-		tcp_ecn_create_request(req, skb, sk);
-
-	if (want_cookie) {
-		isn = cookie_init_sequence(af_ops, sk, skb, &req->mss);
-		req->cookie_ts = tmp_opt.tstamp_ok;
-	} else if (!isn) {
+	if (!want_cookie && !isn) {
 		/* VJ's idea. We save last timestamp seen
 		 * from the destination in peer table, when entering
 		 * state TIME-WAIT, and check against it before
@@ -6007,6 +6017,15 @@ int tcp_conn_request(struct request_sock_ops *rsk_ops,
 		dst = af_ops->route_req(sk, &fl, req, NULL);
 		if (!dst)
 			goto drop_and_free;
+	}
+
+	tcp_ecn_create_request(req, skb, sk, dst);
+
+	if (want_cookie) {
+		isn = cookie_init_sequence(af_ops, sk, skb, &req->mss);
+		req->cookie_ts = tmp_opt.tstamp_ok;
+		if (!tmp_opt.tstamp_ok)
+			inet_rsk(req)->ecn_ok = 0;
 	}
 
 	tcp_rsk(req)->snt_isn = isn;

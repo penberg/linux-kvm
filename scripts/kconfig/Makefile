@@ -3,7 +3,7 @@
 # These targets are used from top-level makefile
 
 PHONY += oldconfig xconfig gconfig menuconfig config silentoldconfig update-po-config \
-	localmodconfig localyesconfig kvmconfig
+	localmodconfig localyesconfig
 
 ifdef KBUILD_KCONFIG
 Kconfig := $(KBUILD_KCONFIG)
@@ -35,11 +35,6 @@ oldconfig: $(obj)/conf
 silentoldconfig: $(obj)/conf
 	$(Q)mkdir -p include/config include/generated
 	$< --$@ $(Kconfig)
-
-kvmconfig:
-	$(Q)$(CONFIG_SHELL) $(srctree)/scripts/config -e KVMTOOL_TEST_ENABLE
-	$(Q)yes "" | make oldconfig > /dev/null
-	@echo 'Kernel configuration modified to run as KVM guest.'
 
 localyesconfig localmodconfig: $(obj)/streamline_config.pl $(obj)/conf
 	$(Q)mkdir -p include/config include/generated

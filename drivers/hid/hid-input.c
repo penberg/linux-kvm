@@ -306,10 +306,16 @@ static enum power_supply_property hidinput_battery_props[] = {
 
 static const struct hid_device_id hid_battery_quirks[] = {
 	{ HID_BLUETOOTH_DEVICE(USB_VENDOR_ID_APPLE,
-			USB_DEVICE_ID_APPLE_ALU_WIRELESS_2009_ISO),
-	HID_BATTERY_QUIRK_PERCENT | HID_BATTERY_QUIRK_FEATURE },
+		USB_DEVICE_ID_APPLE_ALU_WIRELESS_2009_ISO),
+	  HID_BATTERY_QUIRK_PERCENT | HID_BATTERY_QUIRK_FEATURE },
 	{ HID_BLUETOOTH_DEVICE(USB_VENDOR_ID_APPLE,
-			       USB_DEVICE_ID_APPLE_ALU_WIRELESS_2011_ANSI),
+		USB_DEVICE_ID_APPLE_ALU_WIRELESS_2009_ANSI),
+	  HID_BATTERY_QUIRK_PERCENT | HID_BATTERY_QUIRK_FEATURE },
+	{ HID_BLUETOOTH_DEVICE(USB_VENDOR_ID_APPLE,
+		USB_DEVICE_ID_APPLE_ALU_WIRELESS_2011_ANSI),
+	  HID_BATTERY_QUIRK_PERCENT | HID_BATTERY_QUIRK_FEATURE },
+	{ HID_BLUETOOTH_DEVICE(USB_VENDOR_ID_APPLE,
+			       USB_DEVICE_ID_APPLE_ALU_WIRELESS_2011_ISO),
 	  HID_BATTERY_QUIRK_PERCENT | HID_BATTERY_QUIRK_FEATURE },
 	{ HID_BLUETOOTH_DEVICE(USB_VENDOR_ID_APPLE,
 		USB_DEVICE_ID_APPLE_ALU_WIRELESS_ANSI),
@@ -872,7 +878,7 @@ static void hidinput_configure_usage(struct hid_input *hidinput, struct hid_fiel
 		case 0x2cb: map_key_clear(KEY_KBDINPUTASSIST_ACCEPT);	break;
 		case 0x2cc: map_key_clear(KEY_KBDINPUTASSIST_CANCEL);	break;
 
-		default:    goto ignore;
+		default: map_key_clear(KEY_UNKNOWN);
 		}
 		break;
 
@@ -1101,6 +1107,23 @@ void hidinput_hid_event(struct hid_device *hid, struct hid_field *field, struct 
 		return;
 	}
 
+	/*
+	 * Ignore reports for absolute data if the data didn't change. This is
+	 * not only an optimization but also fixes 'dead' key reports. Some
+	 * RollOver implementations for localized keys (like BACKSLASH/PIPE; HID
+	 * 0x31 and 0x32) report multiple keys, even though a localized keyboard
+	 * can only have one of them physically available. The 'dead' keys
+	 * report constant 0. As all map to the same keycode, they'd confuse
+	 * the input layer. If we filter the 'dead' keys on the HID level, we
+	 * skip the keycode translation and only forward real events.
+	 */
+	if (!(field->flags & (HID_MAIN_ITEM_RELATIVE |
+	                      HID_MAIN_ITEM_BUFFERED_BYTE)) &&
+			      (field->flags & HID_MAIN_ITEM_VARIABLE) &&
+	    usage->usage_index < field->maxusage &&
+	    value == field->value[usage->usage_index])
+		return;
+
 	/* report the usage code as scancode if the key status has changed */
 	if (usage->type == EV_KEY && !!test_bit(usage->code, input->key) != value)
 		input_event(input, EV_MSC, MSC_SCAN, usage->hid);
@@ -1215,7 +1238,7 @@ static void hidinput_led_worker(struct work_struct *work)
 		return hid->ll_driver->request(hid, report, HID_REQ_SET_REPORT);
 
 	/* fall back to generic raw-output-report */
-	len = ((report->size - 1) >> 3) + 1 + (report->id > 0);
+	len = hid_report_len(report);
 	buf = hid_alloc_report_buf(report, GFP_KERNEL);
 	if (!buf)
 		return;

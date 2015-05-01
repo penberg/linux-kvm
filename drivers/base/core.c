@@ -1021,18 +1021,6 @@ int device_add(struct device *dev)
 	if (error)
 		goto attrError;
 
-	if (MAJOR(dev->devt)) {
-		error = device_create_file(dev, &dev_attr_dev);
-		if (error)
-			goto ueventattrError;
-
-		error = device_create_sys_dev_entry(dev);
-		if (error)
-			goto devtattrError;
-
-		devtmpfs_create_node(dev);
-	}
-
 	error = device_add_class_symlinks(dev);
 	if (error)
 		goto SymlinkError;
@@ -1046,6 +1034,18 @@ int device_add(struct device *dev)
 	if (error)
 		goto DPMError;
 	device_pm_add(dev);
+
+	if (MAJOR(dev->devt)) {
+		error = device_create_file(dev, &dev_attr_dev);
+		if (error)
+			goto DevAttrError;
+
+		error = device_create_sys_dev_entry(dev);
+		if (error)
+			goto SysEntryError;
+
+		devtmpfs_create_node(dev);
+	}
 
 	/* Notify clients of device addition.  This call must come
 	 * after dpm_sysfs_add() and before kobject_uevent().
@@ -1076,6 +1076,12 @@ int device_add(struct device *dev)
 done:
 	put_device(dev);
 	return error;
+ SysEntryError:
+	if (MAJOR(dev->devt))
+		device_remove_file(dev, &dev_attr_dev);
+ DevAttrError:
+	device_pm_remove(dev);
+	dpm_sysfs_remove(dev);
  DPMError:
 	bus_remove_device(dev);
  BusError:
@@ -1083,14 +1089,6 @@ done:
  AttrsError:
 	device_remove_class_symlinks(dev);
  SymlinkError:
-	if (MAJOR(dev->devt))
-		devtmpfs_delete_node(dev);
-	if (MAJOR(dev->devt))
-		device_remove_sys_dev_entry(dev);
- devtattrError:
-	if (MAJOR(dev->devt))
-		device_remove_file(dev, &dev_attr_dev);
- ueventattrError:
 	device_remove_file(dev, &dev_attr_uevent);
  attrError:
 	kobject_uevent(&dev->kobj, KOBJ_REMOVE);
@@ -2082,54 +2080,47 @@ int dev_printk_emit(int level, const struct device *dev, const char *fmt, ...)
 }
 EXPORT_SYMBOL(dev_printk_emit);
 
-static int __dev_printk(const char *level, const struct device *dev,
+static void __dev_printk(const char *level, const struct device *dev,
 			struct va_format *vaf)
 {
-	if (!dev)
-		return printk("%s(NULL device *): %pV", level, vaf);
-
-	return dev_printk_emit(level[1] - '0', dev,
-			       "%s %s: %pV",
-			       dev_driver_string(dev), dev_name(dev), vaf);
+	if (dev)
+		dev_printk_emit(level[1] - '0', dev, "%s %s: %pV",
+				dev_driver_string(dev), dev_name(dev), vaf);
+	else
+		printk("%s(NULL device *): %pV", level, vaf);
 }
 
-int dev_printk(const char *level, const struct device *dev,
-	       const char *fmt, ...)
+void dev_printk(const char *level, const struct device *dev,
+		const char *fmt, ...)
 {
 	struct va_format vaf;
 	va_list args;
-	int r;
 
 	va_start(args, fmt);
 
 	vaf.fmt = fmt;
 	vaf.va = &args;
 
-	r = __dev_printk(level, dev, &vaf);
+	__dev_printk(level, dev, &vaf);
 
 	va_end(args);
-
-	return r;
 }
 EXPORT_SYMBOL(dev_printk);
 
 #define define_dev_printk_level(func, kern_level)		\
-int func(const struct device *dev, const char *fmt, ...)	\
+void func(const struct device *dev, const char *fmt, ...)	\
 {								\
 	struct va_format vaf;					\
 	va_list args;						\
-	int r;							\
 								\
 	va_start(args, fmt);					\
 								\
 	vaf.fmt = fmt;						\
 	vaf.va = &args;						\
 								\
-	r = __dev_printk(kern_level, dev, &vaf);		\
+	__dev_printk(kern_level, dev, &vaf);			\
 								\
 	va_end(args);						\
-								\
-	return r;						\
 }								\
 EXPORT_SYMBOL(func);
 

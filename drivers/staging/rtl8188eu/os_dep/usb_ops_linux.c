@@ -160,10 +160,10 @@ static int recvbuf2recvframe(struct adapter *adapt, struct sk_buff *pskb)
 		switch (haldata->UsbRxAggMode) {
 		case USB_RX_AGG_DMA:
 		case USB_RX_AGG_MIX:
-			pkt_offset = (u16) round_up(pkt_offset, 128);
+			pkt_offset = (u16)round_up(pkt_offset, 128);
 			break;
 		case USB_RX_AGG_USB:
-			pkt_offset = (u16) round_up(pkt_offset, 4);
+			pkt_offset = (u16)round_up(pkt_offset, 4);
 			break;
 		case USB_RX_AGG_DISABLE:
 		default:
@@ -615,33 +615,6 @@ int usb_write32(struct adapter *adapter, u32 addr, u32 val)
 	return ret;
 }
 
-int usb_writeN(struct adapter *adapter, u32 addr, u32 length, u8 *pdata)
-{
-	u8 request;
-	u8 requesttype;
-	u16 wvalue;
-	u16 index;
-	u16 len;
-	u8 buf[VENDOR_CMD_MAX_DATA_LEN] = {0};
-	int ret;
-
-
-	request = 0x05;
-	requesttype = 0x00;/* write_out */
-	index = 0;/* n/a */
-
-	wvalue = (u16)(addr&0x0000ffff);
-	len = length;
-	 memcpy(buf, pdata, len);
-
-	ret = usbctrl_vendorreq(adapter, request, wvalue, index, buf, len, requesttype);
-
-
-	return RTW_STATUS_CODE(ret);
-}
-
-
-
 static void usb_write_port_complete(struct urb *purb, struct pt_regs *regs)
 {
 	struct xmit_buf *pxmitbuf = (struct xmit_buf *)purb->context;
@@ -843,7 +816,7 @@ void usb_write_port_cancel(struct adapter *padapter)
 void rtl8188eu_recv_tasklet(void *priv)
 {
 	struct sk_buff *pskb;
-	struct adapter *adapt = (struct adapter *)priv;
+	struct adapter *adapt = priv;
 	struct recv_priv *precvpriv = &adapt->recvpriv;
 
 	while (NULL != (pskb = skb_dequeue(&precvpriv->rx_skb_queue))) {
@@ -862,7 +835,7 @@ void rtl8188eu_recv_tasklet(void *priv)
 void rtl8188eu_xmit_tasklet(void *priv)
 {
 	int ret = false;
-	struct adapter *adapt = (struct adapter *)priv;
+	struct adapter *adapt = priv;
 	struct xmit_priv *pxmitpriv = &adapt->xmitpriv;
 
 	if (check_fwstate(&adapt->mlmepriv, _FW_UNDER_SURVEY))

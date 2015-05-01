@@ -122,7 +122,7 @@ static void virtio_mmio_config_in(struct kvm_cpu *vcpu,
 	case VIRTIO_MMIO_INTERRUPT_STATUS:
 		ioport__write32(data, *(u32 *)(((void *)&vmmio->hdr) + addr));
 		break;
-	case VIRTIO_MMIO_HOST_FEATURES:
+	case VIRTIO_MMIO_DEVICE_FEATURES:
 		if (vmmio->hdr.host_features_sel == 0)
 			val = vdev->ops->get_host_features(vmmio->kvm,
 							   vmmio->dev);
@@ -152,8 +152,8 @@ static void virtio_mmio_config_out(struct kvm_cpu *vcpu,
 	u32 val = 0;
 
 	switch (addr) {
-	case VIRTIO_MMIO_HOST_FEATURES_SEL:
-	case VIRTIO_MMIO_GUEST_FEATURES_SEL:
+	case VIRTIO_MMIO_DEVICE_FEATURES_SEL:
+	case VIRTIO_MMIO_DRIVER_FEATURES_SEL:
 	case VIRTIO_MMIO_QUEUE_SEL:
 		val = ioport__read32(data);
 		*(u32 *)(((void *)&vmmio->hdr) + addr) = val;
@@ -165,7 +165,7 @@ static void virtio_mmio_config_out(struct kvm_cpu *vcpu,
 		if (vdev->ops->notify_status)
 			vdev->ops->notify_status(kvm, vmmio->dev, vmmio->hdr.status);
 		break;
-	case VIRTIO_MMIO_GUEST_FEATURES:
+	case VIRTIO_MMIO_DRIVER_FEATURES:
 		if (vmmio->hdr.guest_features_sel == 0) {
 			val = ioport__read32(data);
 			vdev->ops->set_guest_features(vmmio->kvm,

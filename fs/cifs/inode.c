@@ -895,7 +895,7 @@ inode_has_hashed_dentries(struct inode *inode)
 	struct dentry *dentry;
 
 	spin_lock(&inode->i_lock);
-	hlist_for_each_entry(dentry, &inode->i_dentry, d_alias) {
+	hlist_for_each_entry(dentry, &inode->i_dentry, d_u.d_alias) {
 		if (!d_unhashed(dentry) || IS_ROOT(dentry)) {
 			spin_unlock(&inode->i_lock);
 			return true;
@@ -937,8 +937,6 @@ retry_iget5_locked:
 			inode->i_flags |= S_NOATIME | S_NOCMTIME;
 		if (inode->i_state & I_NEW) {
 			inode->i_ino = hash;
-			if (S_ISREG(inode->i_mode))
-				inode->i_data.backing_dev_info = sb->s_bdi;
 #ifdef CONFIG_CIFS_FSCACHE
 			/* initialize per-inode cache cookie pointer */
 			CIFS_I(inode)->fscache = NULL;

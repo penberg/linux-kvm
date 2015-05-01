@@ -39,7 +39,7 @@ int mwifiex_fill_cap_info(struct mwifiex_private *priv, u8 radio_type,
 {
 	uint16_t ht_ext_cap = le16_to_cpu(ht_cap->extended_ht_cap_info);
 	struct ieee80211_supported_band *sband =
-					priv->wdev->wiphy->bands[radio_type];
+					priv->wdev.wiphy->bands[radio_type];
 
 	if (WARN_ON_ONCE(!sband)) {
 		dev_err(priv->adapter->dev, "Invalid radio type!\n");
@@ -314,7 +314,7 @@ mwifiex_cmd_append_11n_tlv(struct mwifiex_private *priv,
 		return ret_len;
 
 	radio_type = mwifiex_band_to_radio_type((u8) bss_desc->bss_band);
-	sband = priv->wdev->wiphy->bands[radio_type];
+	sband = priv->wdev.wiphy->bands[radio_type];
 
 	if (bss_desc->bcn_ht_cap) {
 		ht_cap = (struct mwifiex_ie_types_htcap *) *buffer;
@@ -544,6 +544,7 @@ int mwifiex_send_addba(struct mwifiex_private *priv, int tid, u8 *peer_mac)
 	u32 tx_win_size = priv->add_ba_param.tx_win_size;
 	static u8 dialog_tok;
 	int ret;
+	unsigned long flags;
 	u16 block_ack_param_set;
 
 	dev_dbg(priv->adapter->dev, "cmd: %s: tid %d\n", __func__, tid);
@@ -554,8 +555,10 @@ int mwifiex_send_addba(struct mwifiex_private *priv, int tid, u8 *peer_mac)
 	    memcmp(priv->cfg_bssid, peer_mac, ETH_ALEN)) {
 		struct mwifiex_sta_node *sta_ptr;
 
+		spin_lock_irqsave(&priv->sta_list_spinlock, flags);
 		sta_ptr = mwifiex_get_sta_entry(priv, peer_mac);
 		if (!sta_ptr) {
+			spin_unlock_irqrestore(&priv->sta_list_spinlock, flags);
 			dev_warn(priv->adapter->dev,
 				 "BA setup with unknown TDLS peer %pM!\n",
 				peer_mac);
@@ -563,6 +566,7 @@ int mwifiex_send_addba(struct mwifiex_private *priv, int tid, u8 *peer_mac)
 		}
 		if (sta_ptr->is_11ac_enabled)
 			tx_win_size = MWIFIEX_11AC_STA_AMPDU_DEF_TXWINSIZE;
+		spin_unlock_irqrestore(&priv->sta_list_spinlock, flags);
 	}
 
 	block_ack_param_set = (u16)((tid << BLOCKACKPARAM_TID_POS) |

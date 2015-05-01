@@ -172,7 +172,7 @@ static void __net_exit ip6_fl_purge(struct net *net)
 {
 	int i;
 
-	spin_lock(&ip6_fl_lock);
+	spin_lock_bh(&ip6_fl_lock);
 	for (i = 0; i <= FL_HASH_MASK; i++) {
 		struct ip6_flowlabel *fl;
 		struct ip6_flowlabel __rcu **flp;
@@ -190,7 +190,7 @@ static void __net_exit ip6_fl_purge(struct net *net)
 			flp = &fl->next;
 		}
 	}
-	spin_unlock(&ip6_fl_lock);
+	spin_unlock_bh(&ip6_fl_lock);
 }
 
 static struct ip6_flowlabel *fl_intern(struct net *net,
@@ -654,7 +654,11 @@ release:
 			goto done;
 
 		err = -ENOMEM;
-		if (sfl1 == NULL || (err = mem_check(sk)) != 0)
+		if (sfl1 == NULL)
+			goto done;
+
+		err = mem_check(sk);
+		if (err != 0)
 			goto done;
 
 		fl1 = fl_intern(net, fl, freq.flr_label);
@@ -769,10 +773,9 @@ static void ip6fl_seq_stop(struct seq_file *seq, void *v)
 static int ip6fl_seq_show(struct seq_file *seq, void *v)
 {
 	struct ip6fl_iter_state *state = ip6fl_seq_private(seq);
-	if (v == SEQ_START_TOKEN)
-		seq_printf(seq, "%-5s %-1s %-6s %-6s %-6s %-8s %-32s %s\n",
-			   "Label", "S", "Owner", "Users", "Linger", "Expires", "Dst", "Opt");
-	else {
+	if (v == SEQ_START_TOKEN) {
+		seq_puts(seq, "Label S Owner  Users  Linger Expires  Dst                              Opt\n");
+	} else {
 		struct ip6_flowlabel *fl = v;
 		seq_printf(seq,
 			   "%05X %-1d %-6d %-6d %-6ld %-8ld %pi6 %-4d\n",

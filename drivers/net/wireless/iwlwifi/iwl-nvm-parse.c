@@ -325,6 +325,8 @@ static void iwl_init_vht_hw_capab(const struct iwl_cfg *cfg,
 {
 	int num_rx_ants = num_of_ant(rx_chains);
 	int num_tx_ants = num_of_ant(tx_chains);
+	unsigned int max_ampdu_exponent = (cfg->max_vht_ampdu_exponent ?:
+					   IEEE80211_VHT_MAX_AMPDU_1024K);
 
 	vht_cap->vht_supported = true;
 
@@ -332,7 +334,8 @@ static void iwl_init_vht_hw_capab(const struct iwl_cfg *cfg,
 		       IEEE80211_VHT_CAP_RXSTBC_1 |
 		       IEEE80211_VHT_CAP_SU_BEAMFORMEE_CAPABLE |
 		       3 << IEEE80211_VHT_CAP_BEAMFORMEE_STS_SHIFT |
-		       7 << IEEE80211_VHT_CAP_MAX_A_MPDU_LENGTH_EXPONENT_SHIFT;
+		       max_ampdu_exponent <<
+		       IEEE80211_VHT_CAP_MAX_A_MPDU_LENGTH_EXPONENT_SHIFT;
 
 	if (cfg->ht_params->ldpc)
 		vht_cap->cap |= IEEE80211_VHT_CAP_RXLDPC;
@@ -465,6 +468,8 @@ static void iwl_set_radio_cfg(const struct iwl_cfg *cfg,
 	data->radio_cfg_step = NVM_RF_CFG_STEP_MSK_FAMILY_8000(radio_cfg);
 	data->radio_cfg_dash = NVM_RF_CFG_DASH_MSK_FAMILY_8000(radio_cfg);
 	data->radio_cfg_pnum = NVM_RF_CFG_FLAVOR_MSK_FAMILY_8000(radio_cfg);
+	data->valid_tx_ant = NVM_RF_CFG_TX_ANT_MSK_FAMILY_8000(radio_cfg);
+	data->valid_rx_ant = NVM_RF_CFG_RX_ANT_MSK_FAMILY_8000(radio_cfg);
 }
 
 static void iwl_set_hw_address(const struct iwl_cfg *cfg,
@@ -589,6 +594,10 @@ iwl_parse_nvm_data(struct device *dev, const struct iwl_cfg *cfg,
 
 	radio_cfg = iwl_get_radio_cfg(cfg, nvm_sw);
 	iwl_set_radio_cfg(cfg, data, radio_cfg);
+	if (data->valid_tx_ant)
+		tx_chains &= data->valid_tx_ant;
+	if (data->valid_rx_ant)
+		rx_chains &= data->valid_rx_ant;
 
 	sku = iwl_get_sku(cfg, nvm_sw);
 	data->sku_cap_band_24GHz_enable = sku & NVM_SKU_CAP_BAND_24GHZ;

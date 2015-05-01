@@ -121,6 +121,7 @@ struct comedi_buf_map {
  * @buf_read_ptr:	buffer position for reader
  * @cur_chan:		current position in chanlist for scan (for those
  *			drivers that use it)
+ * @scans_done:		the number of scans completed (COMEDI_CB_EOS)
  * @scan_progress:	amount received or sent for current scan (in bytes)
  * @munge_chan:		current position in chanlist for "munging"
  * @munge_count:	"munge" count (in bytes, modulo 2**32)
@@ -201,6 +202,7 @@ struct comedi_async {
 	unsigned int buf_write_ptr;
 	unsigned int buf_read_ptr;
 	unsigned int cur_chan;
+	unsigned int scans_done;
 	unsigned int scan_progress;
 	unsigned int munge_chan;
 	unsigned int munge_count;
@@ -212,6 +214,28 @@ struct comedi_async {
 	int (*inttrig)(struct comedi_device *dev, struct comedi_subdevice *s,
 		       unsigned int x);
 };
+
+/**
+ * comedi_async callback "events"
+ * @COMEDI_CB_EOS:		end-of-scan
+ * @COMEDI_CB_EOA:		end-of-acquisition/output
+ * @COMEDI_CB_BLOCK:		data has arrived, wakes up read() / write()
+ * @COMEDI_CB_EOBUF:		DEPRECATED: end of buffer
+ * @COMEDI_CB_ERROR:		card error during acquisition
+ * @COMEDI_CB_OVERFLOW:		buffer overflow/underflow
+ *
+ * @COMEDI_CB_ERROR_MASK:	events that indicate an error has occurred
+ * @COMEDI_CB_CANCEL_MASK:	events that will cancel an async command
+ */
+#define COMEDI_CB_EOS		(1 << 0)
+#define COMEDI_CB_EOA		(1 << 1)
+#define COMEDI_CB_BLOCK		(1 << 2)
+#define COMEDI_CB_EOBUF		(1 << 3)
+#define COMEDI_CB_ERROR		(1 << 4)
+#define COMEDI_CB_OVERFLOW	(1 << 5)
+
+#define COMEDI_CB_ERROR_MASK	(COMEDI_CB_ERROR | COMEDI_CB_OVERFLOW)
+#define COMEDI_CB_CANCEL_MASK	(COMEDI_CB_EOA | COMEDI_CB_ERROR_MASK)
 
 struct comedi_driver {
 	struct comedi_driver *next;
@@ -275,34 +299,25 @@ struct comedi_device {
 
 void comedi_event(struct comedi_device *dev, struct comedi_subdevice *s);
 
-/* we can expand the number of bits used to encode devices/subdevices into
- the minor number soon, after more distros support > 8 bit minor numbers
- (like after Debian Etch gets released) */
-enum comedi_minor_bits {
-	COMEDI_DEVICE_MINOR_MASK = 0xf,
-	COMEDI_SUBDEVICE_MINOR_MASK = 0xf0
-};
-
-static const unsigned COMEDI_SUBDEVICE_MINOR_SHIFT = 4;
-static const unsigned COMEDI_SUBDEVICE_MINOR_OFFSET = 1;
-
 struct comedi_device *comedi_dev_get_from_minor(unsigned minor);
 int comedi_dev_put(struct comedi_device *dev);
 
-void init_polling(void);
-void cleanup_polling(void);
-void start_polling(struct comedi_device *);
-void stop_polling(struct comedi_device *);
+/**
+ * comedi_subdevice "runflags"
+ * @COMEDI_SRF_RT:		DEPRECATED: command is running real-time
+ * @COMEDI_SRF_ERROR:		indicates an COMEDI_CB_ERROR event has occurred
+ *				since the last command was started
+ * @COMEDI_SRF_RUNNING:		command is running
+ * @COMEDI_SRF_FREE_SPRIV:	free s->private on detach
+ *
+ * @COMEDI_SRF_BUSY_MASK:	runflags that indicate the subdevice is "busy"
+ */
+#define COMEDI_SRF_RT		BIT(1)
+#define COMEDI_SRF_ERROR	BIT(2)
+#define COMEDI_SRF_RUNNING	BIT(27)
+#define COMEDI_SRF_FREE_SPRIV	BIT(31)
 
-/* subdevice runflags */
-enum subdevice_runflags {
-	SRF_RT = 0x00000002,
-	/* indicates an COMEDI_CB_ERROR event has occurred since the last
-	 * command was started */
-	SRF_ERROR = 0x00000004,
-	SRF_RUNNING = 0x08000000,
-	SRF_FREE_SPRIV = 0x80000000,	/* free s->private on detach */
-};
+#define COMEDI_SRF_BUSY_MASK	(COMEDI_SRF_ERROR | COMEDI_SRF_RUNNING)
 
 bool comedi_is_subdevice_running(struct comedi_subdevice *s);
 
@@ -391,12 +406,61 @@ static inline unsigned int comedi_offset_munge(struct comedi_subdevice *s,
 	return val ^ s->maxdata ^ (s->maxdata >> 1);
 }
 
-static inline unsigned int bytes_per_sample(const struct comedi_subdevice *subd)
+/**
+ * comedi_bytes_per_sample - determine subdevice sample size
+ * @s:		comedi_subdevice struct
+ *
+ * The sample size will be 4 (sizeof int) or 2 (sizeof short) depending on
+ * whether the SDF_LSAMPL subdevice flag is set or not.
+ *
+ * Returns the subdevice sample size.
+ */
+static inline unsigned int comedi_bytes_per_sample(struct comedi_subdevice *s)
 {
-	if (subd->subdev_flags & SDF_LSAMPL)
-		return sizeof(unsigned int);
+	return s->subdev_flags & SDF_LSAMPL ? sizeof(int) : sizeof(short);
+}
 
-	return sizeof(short);
+/**
+ * comedi_sample_shift - determine log2 of subdevice sample size
+ * @s:		comedi_subdevice struct
+ *
+ * The sample size will be 4 (sizeof int) or 2 (sizeof short) depending on
+ * whether the SDF_LSAMPL subdevice flag is set or not.  The log2 of the
+ * sample size will be 2 or 1 and can be used as the right operand of a
+ * bit-shift operator to multiply or divide something by the sample size.
+ *
+ * Returns log2 of the subdevice sample size.
+ */
+static inline unsigned int comedi_sample_shift(struct comedi_subdevice *s)
+{
+	return s->subdev_flags & SDF_LSAMPL ? 2 : 1;
+}
+
+/**
+ * comedi_bytes_to_samples - converts a number of bytes to a number of samples
+ * @s:		comedi_subdevice struct
+ * @nbytes:	number of bytes
+ *
+ * Returns the number of bytes divided by the subdevice sample size.
+ */
+static inline unsigned int comedi_bytes_to_samples(struct comedi_subdevice *s,
+						   unsigned int nbytes)
+{
+	return nbytes >> comedi_sample_shift(s);
+}
+
+/**
+ * comedi_samples_to_bytes - converts a number of samples to a number of bytes
+ * @s:		comedi_subdevice struct
+ * @nsamples:	number of samples
+ *
+ * Returns the number of samples multiplied by the subdevice sample size.
+ * Does not check for arithmetic overflow.
+ */
+static inline unsigned int comedi_samples_to_bytes(struct comedi_subdevice *s,
+						   unsigned int nsamples)
+{
+	return nsamples << comedi_sample_shift(s);
 }
 
 /*
@@ -419,18 +483,10 @@ unsigned int comedi_buf_read_n_available(struct comedi_subdevice *s);
 unsigned int comedi_buf_read_alloc(struct comedi_subdevice *s, unsigned int n);
 unsigned int comedi_buf_read_free(struct comedi_subdevice *s, unsigned int n);
 
-int comedi_buf_put(struct comedi_subdevice *s, unsigned short x);
-int comedi_buf_get(struct comedi_subdevice *s, unsigned short *x);
-
-void comedi_buf_memcpy_to(struct comedi_subdevice *s, unsigned int offset,
-			  const void *source, unsigned int num_bytes);
-void comedi_buf_memcpy_from(struct comedi_subdevice *s, unsigned int offset,
-			    void *destination, unsigned int num_bytes);
-unsigned int comedi_write_array_to_buffer(struct comedi_subdevice *s,
-					  const void *data,
-					  unsigned int num_bytes);
-unsigned int comedi_read_array_from_buffer(struct comedi_subdevice *s,
-					   void *data, unsigned int num_bytes);
+unsigned int comedi_buf_write_samples(struct comedi_subdevice *s,
+				      const void *data, unsigned int nsamples);
+unsigned int comedi_buf_read_samples(struct comedi_subdevice *s,
+				     void *data, unsigned int nsamples);
 
 /* drivers.c - general comedi driver functions */
 
@@ -451,6 +507,10 @@ int comedi_dio_insn_config(struct comedi_device *, struct comedi_subdevice *,
 unsigned int comedi_dio_update_state(struct comedi_subdevice *,
 				     unsigned int *data);
 unsigned int comedi_bytes_per_scan(struct comedi_subdevice *s);
+unsigned int comedi_nscans_left(struct comedi_subdevice *s,
+				unsigned int nscans);
+unsigned int comedi_nsamples_left(struct comedi_subdevice *s,
+				  unsigned int nsamples);
 void comedi_inc_scan_progress(struct comedi_subdevice *s,
 			      unsigned int num_bytes);
 
@@ -492,8 +552,6 @@ void comedi_driver_unregister(struct comedi_driver *);
 #define module_comedi_driver(__comedi_driver) \
 	module_driver(__comedi_driver, comedi_driver_register, \
 			comedi_driver_unregister)
-
-#ifdef CONFIG_COMEDI_PCI_DRIVERS
 
 /* comedi_pci.c - comedi PCI driver specific functions */
 
@@ -537,103 +595,5 @@ void comedi_pci_driver_unregister(struct comedi_driver *, struct pci_driver *);
 #define module_comedi_pci_driver(__comedi_driver, __pci_driver) \
 	module_driver(__comedi_driver, comedi_pci_driver_register, \
 			comedi_pci_driver_unregister, &(__pci_driver))
-
-#else
-
-/*
- * Some of the comedi mixed ISA/PCI drivers call the PCI specific
- * functions. Provide some dummy functions if CONFIG_COMEDI_PCI_DRIVERS
- * is not enabled.
- */
-
-static inline struct pci_dev *comedi_to_pci_dev(struct comedi_device *dev)
-{
-	return NULL;
-}
-
-static inline int comedi_pci_enable(struct comedi_device *dev)
-{
-	return -ENOSYS;
-}
-
-static inline void comedi_pci_disable(struct comedi_device *dev)
-{
-}
-
-static inline void comedi_pci_detach(struct comedi_device *dev)
-{
-}
-
-#endif /* CONFIG_COMEDI_PCI_DRIVERS */
-
-#ifdef CONFIG_COMEDI_PCMCIA_DRIVERS
-
-/* comedi_pcmcia.c - comedi PCMCIA driver specific functions */
-
-struct pcmcia_driver;
-struct pcmcia_device;
-
-struct pcmcia_device *comedi_to_pcmcia_dev(struct comedi_device *);
-
-int comedi_pcmcia_enable(struct comedi_device *,
-			 int (*conf_check)(struct pcmcia_device *, void *));
-void comedi_pcmcia_disable(struct comedi_device *);
-
-int comedi_pcmcia_auto_config(struct pcmcia_device *, struct comedi_driver *);
-void comedi_pcmcia_auto_unconfig(struct pcmcia_device *);
-
-int comedi_pcmcia_driver_register(struct comedi_driver *,
-				  struct pcmcia_driver *);
-void comedi_pcmcia_driver_unregister(struct comedi_driver *,
-				     struct pcmcia_driver *);
-
-/**
- * module_comedi_pcmcia_driver() - Helper macro for registering a comedi PCMCIA driver
- * @__comedi_driver: comedi_driver struct
- * @__pcmcia_driver: pcmcia_driver struct
- *
- * Helper macro for comedi PCMCIA drivers which do not do anything special
- * in module init/exit. This eliminates a lot of boilerplate. Each
- * module may only use this macro once, and calling it replaces
- * module_init() and module_exit()
- */
-#define module_comedi_pcmcia_driver(__comedi_driver, __pcmcia_driver) \
-	module_driver(__comedi_driver, comedi_pcmcia_driver_register, \
-			comedi_pcmcia_driver_unregister, &(__pcmcia_driver))
-
-#endif /* CONFIG_COMEDI_PCMCIA_DRIVERS */
-
-#ifdef CONFIG_COMEDI_USB_DRIVERS
-
-/* comedi_usb.c - comedi USB driver specific functions */
-
-struct usb_driver;
-struct usb_interface;
-
-struct usb_interface *comedi_to_usb_interface(struct comedi_device *);
-struct usb_device *comedi_to_usb_dev(struct comedi_device *);
-
-int comedi_usb_auto_config(struct usb_interface *, struct comedi_driver *,
-			   unsigned long context);
-void comedi_usb_auto_unconfig(struct usb_interface *);
-
-int comedi_usb_driver_register(struct comedi_driver *, struct usb_driver *);
-void comedi_usb_driver_unregister(struct comedi_driver *, struct usb_driver *);
-
-/**
- * module_comedi_usb_driver() - Helper macro for registering a comedi USB driver
- * @__comedi_driver: comedi_driver struct
- * @__usb_driver: usb_driver struct
- *
- * Helper macro for comedi USB drivers which do not do anything special
- * in module init/exit. This eliminates a lot of boilerplate. Each
- * module may only use this macro once, and calling it replaces
- * module_init() and module_exit()
- */
-#define module_comedi_usb_driver(__comedi_driver, __usb_driver) \
-	module_driver(__comedi_driver, comedi_usb_driver_register, \
-			comedi_usb_driver_unregister, &(__usb_driver))
-
-#endif /* CONFIG_COMEDI_USB_DRIVERS */
 
 #endif /* _COMEDIDEV_H */

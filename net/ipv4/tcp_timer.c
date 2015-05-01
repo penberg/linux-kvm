@@ -101,17 +101,20 @@ static int tcp_orphan_retries(struct sock *sk, int alive)
 
 static void tcp_mtu_probing(struct inet_connection_sock *icsk, struct sock *sk)
 {
+	struct net *net = sock_net(sk);
+
 	/* Black hole detection */
-	if (sysctl_tcp_mtu_probing) {
+	if (net->ipv4.sysctl_tcp_mtu_probing) {
 		if (!icsk->icsk_mtup.enabled) {
 			icsk->icsk_mtup.enabled = 1;
 			tcp_sync_mss(sk, icsk->icsk_pmtu_cookie);
 		} else {
+			struct net *net = sock_net(sk);
 			struct tcp_sock *tp = tcp_sk(sk);
 			int mss;
 
 			mss = tcp_mtu_to_mss(sk, icsk->icsk_mtup.search_low) >> 1;
-			mss = min(sysctl_tcp_base_mss, mss);
+			mss = min(net->ipv4.sysctl_tcp_base_mss, mss);
 			mss = max(mss, 68 - tp->tcp_header_len);
 			icsk->icsk_mtup.search_low = tcp_mss_to_mtu(sk, mss);
 			tcp_sync_mss(sk, icsk->icsk_pmtu_cookie);
@@ -374,17 +377,19 @@ void tcp_retransmit_timer(struct sock *sk)
 		 */
 		struct inet_sock *inet = inet_sk(sk);
 		if (sk->sk_family == AF_INET) {
-			LIMIT_NETDEBUG(KERN_DEBUG pr_fmt("Peer %pI4:%u/%u unexpectedly shrunk window %u:%u (repaired)\n"),
-				       &inet->inet_daddr,
-				       ntohs(inet->inet_dport), inet->inet_num,
-				       tp->snd_una, tp->snd_nxt);
+			net_dbg_ratelimited("Peer %pI4:%u/%u unexpectedly shrunk window %u:%u (repaired)\n",
+					    &inet->inet_daddr,
+					    ntohs(inet->inet_dport),
+					    inet->inet_num,
+					    tp->snd_una, tp->snd_nxt);
 		}
 #if IS_ENABLED(CONFIG_IPV6)
 		else if (sk->sk_family == AF_INET6) {
-			LIMIT_NETDEBUG(KERN_DEBUG pr_fmt("Peer %pI6:%u/%u unexpectedly shrunk window %u:%u (repaired)\n"),
-				       &sk->sk_v6_daddr,
-				       ntohs(inet->inet_dport), inet->inet_num,
-				       tp->snd_una, tp->snd_nxt);
+			net_dbg_ratelimited("Peer %pI6:%u/%u unexpectedly shrunk window %u:%u (repaired)\n",
+					    &sk->sk_v6_daddr,
+					    ntohs(inet->inet_dport),
+					    inet->inet_num,
+					    tp->snd_una, tp->snd_nxt);
 		}
 #endif
 		if (tcp_time_stamp - tp->rcv_tstamp > TCP_RTO_MAX) {

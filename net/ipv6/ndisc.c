@@ -162,7 +162,8 @@ static void ndisc_fill_addr_option(struct sk_buff *skb, int type, void *data)
 	memcpy(opt+2, data, data_len);
 	data_len += 2;
 	opt += data_len;
-	if ((space -= data_len) > 0)
+	space -= data_len;
+	if (space > 0)
 		memset(opt, 0, space);
 }
 
@@ -654,10 +655,12 @@ static void ndisc_solicit(struct neighbour *neigh, struct sk_buff *skb)
 	struct in6_addr *target = (struct in6_addr *)&neigh->primary_key;
 	int probes = atomic_read(&neigh->probes);
 
-	if (skb && ipv6_chk_addr(dev_net(dev), &ipv6_hdr(skb)->saddr, dev, 1))
+	if (skb && ipv6_chk_addr_and_flags(dev_net(dev), &ipv6_hdr(skb)->saddr,
+					   dev, 1,
+					   IFA_F_TENTATIVE|IFA_F_OPTIMISTIC))
 		saddr = &ipv6_hdr(skb)->saddr;
-
-	if ((probes -= NEIGH_VAR(neigh->parms, UCAST_PROBES)) < 0) {
+	probes -= NEIGH_VAR(neigh->parms, UCAST_PROBES);
+	if (probes < 0) {
 		if (!(neigh->nud_state & NUD_VALID)) {
 			ND_PRINTK(1, dbg,
 				  "%s: trying to ucast probe in NUD_INVALID: %pI6\n",
@@ -1347,7 +1350,7 @@ skip_routeinfo:
 		}
 	}
 
-	if (ndopts.nd_opts_mtu) {
+	if (ndopts.nd_opts_mtu && in6_dev->cnf.accept_ra_mtu) {
 		__be32 n;
 		u32 mtu;
 
@@ -1763,7 +1766,7 @@ int __init ndisc_init(void)
 	/*
 	 * Initialize the neighbour table
 	 */
-	neigh_table_init(&nd_tbl);
+	neigh_table_init(NEIGH_ND_TABLE, &nd_tbl);
 
 #ifdef CONFIG_SYSCTL
 	err = neigh_sysctl_register(NULL, &nd_tbl.parms,
@@ -1796,6 +1799,6 @@ void ndisc_cleanup(void)
 #ifdef CONFIG_SYSCTL
 	neigh_sysctl_unregister(&nd_tbl.parms);
 #endif
-	neigh_table_clear(&nd_tbl);
+	neigh_table_clear(NEIGH_ND_TABLE, &nd_tbl);
 	unregister_pernet_subsys(&ndisc_net_ops);
 }

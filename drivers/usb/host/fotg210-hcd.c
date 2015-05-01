@@ -1521,8 +1521,8 @@ fotg210_hub_descriptor(
 	memset(&desc->u.hs.DeviceRemovable[0], 0, temp);
 	memset(&desc->u.hs.DeviceRemovable[temp], 0xff, temp);
 
-	temp = 0x0008;		/* per-port overcurrent reporting */
-	temp |= 0x0002;		/* no power switching */
+	temp = HUB_CHAR_INDV_PORT_OCPM;	/* per-port overcurrent reporting */
+	temp |= HUB_CHAR_NO_LPSM;	/* no power switching */
 	desc->wHubCharacteristics = cpu_to_le16(temp);
 }
 
@@ -4958,7 +4958,7 @@ static ssize_t store_uframe_periodic_max(struct device *dev,
 
 		if (allocated_max > uframe_periodic_max) {
 			fotg210_info(fotg210,
-				"cannot decrease uframe_periodic_max becase "
+				"cannot decrease uframe_periodic_max because "
 				"periodic bandwidth is already allocated "
 				"(%u > %u)\n",
 				allocated_max, uframe_periodic_max);

@@ -10,7 +10,7 @@ extern int timekeeping_suspended;
  * Get and set timeofday
  */
 extern void do_gettimeofday(struct timeval *tv);
-extern int do_settimeofday(const struct timespec *tv);
+extern int do_settimeofday64(const struct timespec64 *ts);
 extern int do_sys_settimeofday(const struct timespec *tv,
 			       const struct timezone *tz);
 
@@ -25,14 +25,25 @@ struct timespec __current_kernel_time(void);
 /*
  * timespec based interfaces
  */
-struct timespec get_monotonic_coarse(void);
-extern void getrawmonotonic(struct timespec *ts);
+struct timespec64 get_monotonic_coarse64(void);
+extern void getrawmonotonic64(struct timespec64 *ts);
 extern void ktime_get_ts64(struct timespec64 *ts);
+extern time64_t ktime_get_seconds(void);
+extern time64_t ktime_get_real_seconds(void);
 
 extern int __getnstimeofday64(struct timespec64 *tv);
 extern void getnstimeofday64(struct timespec64 *tv);
+extern void getboottime64(struct timespec64 *ts);
 
 #if BITS_PER_LONG == 64
+/**
+ * Deprecated. Use do_settimeofday64().
+ */
+static inline int do_settimeofday(const struct timespec *ts)
+{
+	return do_settimeofday64(ts);
+}
+
 static inline int __getnstimeofday(struct timespec *ts)
 {
 	return __getnstimeofday64(ts);
@@ -53,7 +64,32 @@ static inline void ktime_get_real_ts(struct timespec *ts)
 	getnstimeofday64(ts);
 }
 
+static inline void getrawmonotonic(struct timespec *ts)
+{
+	getrawmonotonic64(ts);
+}
+
+static inline struct timespec get_monotonic_coarse(void)
+{
+	return get_monotonic_coarse64();
+}
+
+static inline void getboottime(struct timespec *ts)
+{
+	return getboottime64(ts);
+}
 #else
+/**
+ * Deprecated. Use do_settimeofday64().
+ */
+static inline int do_settimeofday(const struct timespec *ts)
+{
+	struct timespec64 ts64;
+
+	ts64 = timespec_to_timespec64(*ts);
+	return do_settimeofday64(&ts64);
+}
+
 static inline int __getnstimeofday(struct timespec *ts)
 {
 	struct timespec64 ts64;
@@ -86,9 +122,28 @@ static inline void ktime_get_real_ts(struct timespec *ts)
 	getnstimeofday64(&ts64);
 	*ts = timespec64_to_timespec(ts64);
 }
-#endif
 
-extern void getboottime(struct timespec *ts);
+static inline void getrawmonotonic(struct timespec *ts)
+{
+	struct timespec64 ts64;
+
+	getrawmonotonic64(&ts64);
+	*ts = timespec64_to_timespec(ts64);
+}
+
+static inline struct timespec get_monotonic_coarse(void)
+{
+	return timespec64_to_timespec(get_monotonic_coarse64());
+}
+
+static inline void getboottime(struct timespec *ts)
+{
+	struct timespec64 ts64;
+
+	getboottime64(&ts64);
+	*ts = timespec64_to_timespec(ts64);
+}
+#endif
 
 #define do_posix_clock_monotonic_gettime(ts) ktime_get_ts(ts)
 #define ktime_get_real_ts64(ts)	getnstimeofday64(ts)
@@ -174,6 +229,11 @@ static inline void get_monotonic_boottime(struct timespec *ts)
 	*ts = ktime_to_timespec(ktime_get_boottime());
 }
 
+static inline void get_monotonic_boottime64(struct timespec64 *ts)
+{
+	*ts = ktime_to_timespec64(ktime_get_boottime());
+}
+
 static inline void timekeeping_clocktai(struct timespec *ts)
 {
 	*ts = ktime_to_timespec(ktime_get_clocktai());
@@ -182,7 +242,7 @@ static inline void timekeeping_clocktai(struct timespec *ts)
 /*
  * RTC specific
  */
-extern void timekeeping_inject_sleeptime(struct timespec *delta);
+extern void timekeeping_inject_sleeptime64(struct timespec64 *delta);
 
 /*
  * PPS accessor

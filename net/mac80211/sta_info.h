@@ -49,6 +49,9 @@
  *	packets. This means the link is enabled.
  * @WLAN_STA_TDLS_INITIATOR: We are the initiator of the TDLS link with this
  *	station.
+ * @WLAN_STA_TDLS_CHAN_SWITCH: This TDLS peer supports TDLS channel-switching
+ * @WLAN_STA_TDLS_OFF_CHANNEL: The local STA is currently off-channel with this
+ *	TDLS peer
  * @WLAN_STA_UAPSD: Station requested unscheduled SP while driver was
  *	keeping station in power-save mode, reply when the driver
  *	unblocks the station.
@@ -78,6 +81,8 @@ enum ieee80211_sta_info_flags {
 	WLAN_STA_TDLS_PEER,
 	WLAN_STA_TDLS_PEER_AUTH,
 	WLAN_STA_TDLS_INITIATOR,
+	WLAN_STA_TDLS_CHAN_SWITCH,
+	WLAN_STA_TDLS_OFF_CHANNEL,
 	WLAN_STA_UAPSD,
 	WLAN_STA_SP,
 	WLAN_STA_4ADDR_EVENT,
@@ -249,6 +254,9 @@ struct ieee80211_tx_latency_stat {
 	u32 bin_count;
 };
 
+/* Value to indicate no TID reservation */
+#define IEEE80211_TID_UNRESERVED	0xff
+
 /**
  * struct sta_info - STA information
  *
@@ -337,6 +345,15 @@ struct ieee80211_tx_latency_stat {
  *	AP only.
  * @cipher_scheme: optional cipher scheme for this station
  * @last_tdls_pkt_time: holds the time in jiffies of last TDLS pkt ACKed
+ * @reserved_tid: reserved TID (if any, otherwise IEEE80211_TID_UNRESERVED)
+ * @tx_msdu: MSDUs transmitted to this station, using IEEE80211_NUM_TID
+ *	entry for non-QoS frames
+ * @tx_msdu_retries: MSDU retries for transmissions to to this station,
+ *	using IEEE80211_NUM_TID entry for non-QoS frames
+ * @tx_msdu_failed: MSDU failures for transmissions to to this station,
+ *	using IEEE80211_NUM_TID entry for non-QoS frames
+ * @rx_msdu: MSDUs received from this station, using IEEE80211_NUM_TID
+ *	entry for non-QoS frames
  */
 struct sta_info {
 	/* General information, mostly static */
@@ -407,6 +424,10 @@ struct sta_info {
 	u32 last_rx_rate_vht_flag;
 	u8 last_rx_rate_vht_nss;
 	u16 tid_seq[IEEE80211_QOS_CTL_TID_MASK + 1];
+	u64 tx_msdu[IEEE80211_NUM_TIDS + 1];
+	u64 tx_msdu_retries[IEEE80211_NUM_TIDS + 1];
+	u64 tx_msdu_failed[IEEE80211_NUM_TIDS + 1];
+	u64 rx_msdu[IEEE80211_NUM_TIDS + 1];
 
 	/*
 	 * Aggregation information, locked with lock.
@@ -453,6 +474,8 @@ struct sta_info {
 
 	/* TDLS timeout data */
 	unsigned long last_tdls_pkt_time;
+
+	u8 reserved_tid;
 
 	/* keep last! */
 	struct ieee80211_sta sta;

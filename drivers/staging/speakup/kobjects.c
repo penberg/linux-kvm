@@ -81,7 +81,7 @@ static ssize_t chars_chartab_show(struct kobject *kobj,
 static void report_char_chartab_status(int reset, int received, int used,
 	int rejected, int do_characters)
 {
-	char *object_type[] = {
+	static char const *object_type[] = {
 		"character class entries",
 		"character descriptions",
 	};
@@ -566,7 +566,7 @@ ssize_t spk_var_show(struct kobject *kobj, struct kobj_attribute *attr,
 				if (ch >= ' ' && ch < '~')
 					*cp1++ = ch;
 				else
-					cp1 += sprintf(cp1, "\\""x%02x", ch);
+					cp1 += sprintf(cp1, "\\x%02x", ch);
 			}
 			*cp1++ = '"';
 			*cp1++ = '\n';
@@ -809,9 +809,9 @@ static ssize_t message_store_helper(const char *buf, size_t count,
 			if (msg_stored == -ENOMEM)
 				reset = 1;
 			break;
-		} else {
-			used++;
 		}
+
+		used++;
 
 		cp = linefeed + 1;
 	}

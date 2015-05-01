@@ -473,6 +473,7 @@ void crypto_unregister_template(struct crypto_template *tmpl)
 	list = &tmpl->instances;
 	hlist_for_each_entry(inst, list, list) {
 		int err = crypto_remove_alg(&inst->alg, &users);
+
 		BUG_ON(err);
 	}
 
@@ -509,8 +510,8 @@ static struct crypto_template *__crypto_lookup_template(const char *name)
 
 struct crypto_template *crypto_lookup_template(const char *name)
 {
-	return try_then_request_module(__crypto_lookup_template(name), "%s",
-				       name);
+	return try_then_request_module(__crypto_lookup_template(name),
+				       "crypto-%s", name);
 }
 EXPORT_SYMBOL_GPL(crypto_lookup_template);
 

@@ -45,7 +45,7 @@
 #include "ptlrpc_internal.h"
 
 
-struct ll_rpc_opcode {
+static struct ll_rpc_opcode {
 	__u32       opcode;
 	const char *opname;
 } ll_rpc_opcode_table[LUSTRE_MAX_OPCODES] = {
@@ -136,7 +136,7 @@ struct ll_rpc_opcode {
 	{ UPDATE_OBJ,	    "update_obj" },
 };
 
-struct ll_eopcode {
+static struct ll_eopcode {
 	__u32       opcode;
 	const char *opname;
 } ll_eopcode_table[EXTRA_LAST_OPC] = {
@@ -175,15 +175,17 @@ const char *ll_opcode2str(__u32 opcode)
 	return ll_rpc_opcode_table[offset].opname;
 }
 
-const char* ll_eopcode2str(__u32 opcode)
+static const char *ll_eopcode2str(__u32 opcode)
 {
 	LASSERT(ll_eopcode_table[opcode].opcode == opcode);
 	return ll_eopcode_table[opcode].opname;
 }
+
 #if defined (CONFIG_PROC_FS)
-void ptlrpc_lprocfs_register(struct proc_dir_entry *root, char *dir,
-			     char *name, struct proc_dir_entry **procroot_ret,
-			     struct lprocfs_stats **stats_ret)
+static void ptlrpc_lprocfs_register(struct proc_dir_entry *root, char *dir,
+				    char *name,
+				    struct proc_dir_entry **procroot_ret,
+				    struct lprocfs_stats **stats_ret)
 {
 	struct proc_dir_entry *svc_procroot;
 	struct lprocfs_stats *svc_stats;
@@ -284,8 +286,9 @@ ptlrpc_lprocfs_req_history_max_seq_show(struct seq_file *m, void *n)
 }
 
 static ssize_t
-ptlrpc_lprocfs_req_history_max_seq_write(struct file *file, const char *buffer,
-					 size_t count, loff_t *off)
+ptlrpc_lprocfs_req_history_max_seq_write(struct file *file,
+					const char __user *buffer,
+					size_t count, loff_t *off)
 {
 	struct ptlrpc_service *svc = ((struct seq_file *)file->private_data)->private;
 	int			    bufpages;
@@ -329,8 +332,9 @@ ptlrpc_lprocfs_threads_min_seq_show(struct seq_file *m, void *n)
 }
 
 static ssize_t
-ptlrpc_lprocfs_threads_min_seq_write(struct file *file, const char *buffer,
-				     size_t count, loff_t *off)
+ptlrpc_lprocfs_threads_min_seq_write(struct file *file,
+					const char __user *buffer,
+					size_t count, loff_t *off)
 {
 	struct ptlrpc_service *svc = ((struct seq_file *)file->private_data)->private;
 	int	val;
@@ -381,8 +385,9 @@ ptlrpc_lprocfs_threads_max_seq_show(struct seq_file *m, void *n)
 }
 
 static ssize_t
-ptlrpc_lprocfs_threads_max_seq_write(struct file *file, const char *buffer,
-				     size_t count, loff_t *off)
+ptlrpc_lprocfs_threads_max_seq_write(struct file *file,
+				const char __user *buffer,
+				size_t count, loff_t *off)
 {
 	struct ptlrpc_service *svc = ((struct seq_file *)file->private_data)->private;
 	int	val;
@@ -694,8 +699,7 @@ default_queue:
 	if (queue == PTLRPC_NRS_QUEUE_HP && !nrs_svc_has_hp(svc)) {
 		rc = -ENODEV;
 		goto out;
-	}
-	else if (queue == PTLRPC_NRS_QUEUE_BOTH && !nrs_svc_has_hp(svc))
+	} else if (queue == PTLRPC_NRS_QUEUE_BOTH && !nrs_svc_has_hp(svc))
 		queue = PTLRPC_NRS_QUEUE_REG;
 
 	/**
@@ -724,7 +728,7 @@ struct ptlrpc_srh_iterator {
 	struct ptlrpc_request	*srhi_req;
 };
 
-int
+static int
 ptlrpc_lprocfs_svc_req_history_seek(struct ptlrpc_service_part *svcpt,
 				    struct ptlrpc_srh_iterator *srhi,
 				    __u64 seq)
@@ -746,8 +750,7 @@ ptlrpc_lprocfs_svc_req_history_seek(struct ptlrpc_service_part *svcpt,
 			 svcpt->scp_service->srv_name, svcpt->scp_cpt,
 			 srhi->srhi_seq, srhi->srhi_req->rq_history_seq);
 		LASSERTF(!list_empty(&svcpt->scp_hist_reqs),
-			 "%s:%d: seek offset %llu, request seq %llu, "
-			 "last culled %llu\n",
+			 "%s:%d: seek offset %llu, request seq %llu, last culled %llu\n",
 			 svcpt->scp_service->srv_name, svcpt->scp_cpt,
 			 seq, srhi->srhi_seq, svcpt->scp_hist_seq_culled);
 		e = &srhi->srhi_req->rq_history_list;
@@ -814,8 +817,8 @@ ptlrpc_lprocfs_svc_req_history_start(struct seq_file *s, loff_t *pos)
 	int				i;
 
 	if (sizeof(loff_t) != sizeof(__u64)) { /* can't support */
-		CWARN("Failed to read request history because size of loff_t "
-		      "%d can't match size of u64\n", (int)sizeof(loff_t));
+		CWARN("Failed to read request history because size of loff_t %d can't match size of u64\n",
+		      (int)sizeof(loff_t));
 		return NULL;
 	}
 
@@ -1027,7 +1030,7 @@ static int ptlrpc_lprocfs_hp_ratio_seq_show(struct seq_file *m, void *v)
 }
 
 static ssize_t ptlrpc_lprocfs_hp_ratio_seq_write(struct file *file,
-					     const char *buffer,
+					     const char __user *buffer,
 					     size_t count,
 					     loff_t *off)
 {
@@ -1177,7 +1180,7 @@ EXPORT_SYMBOL(ptlrpc_lprocfs_unregister_obd);
 
 #define BUFLEN (UUID_MAX + 5)
 
-int lprocfs_wr_evict_client(struct file *file, const char *buffer,
+int lprocfs_wr_evict_client(struct file *file, const char __user *buffer,
 			    size_t count, loff_t *off)
 {
 	struct obd_device *obd = ((struct seq_file *)file->private_data)->private;
@@ -1225,7 +1228,7 @@ EXPORT_SYMBOL(lprocfs_wr_evict_client);
 
 #undef BUFLEN
 
-int lprocfs_wr_ping(struct file *file, const char *buffer,
+int lprocfs_wr_ping(struct file *file, const char __user *buffer,
 		    size_t count, loff_t *off)
 {
 	struct obd_device *obd = ((struct seq_file *)file->private_data)->private;
@@ -1253,7 +1256,7 @@ EXPORT_SYMBOL(lprocfs_wr_ping);
  * The connection UUID is a node's primary NID. For example,
  * "echo connection=192.168.0.1@tcp0::instance > .../import".
  */
-int lprocfs_wr_import(struct file *file, const char *buffer,
+int lprocfs_wr_import(struct file *file, const char __user *buffer,
 		      size_t count, loff_t *off)
 {
 	struct obd_device *obd = ((struct seq_file *)file->private_data)->private;
@@ -1298,14 +1301,12 @@ int lprocfs_wr_import(struct file *file, const char *buffer,
 		if (*endptr) {
 			CERROR("config: wrong instance # %s\n", ptr);
 		} else if (inst != imp->imp_connect_data.ocd_instance) {
-			CDEBUG(D_INFO, "IR: %s is connecting to an obsoleted "
-			       "target(%u/%u), reconnecting...\n",
+			CDEBUG(D_INFO, "IR: %s is connecting to an obsoleted target(%u/%u), reconnecting...\n",
 			       imp->imp_obd->obd_name,
 			       imp->imp_connect_data.ocd_instance, inst);
 			do_reconn = 1;
 		} else {
-			CDEBUG(D_INFO, "IR: %s has already been connecting to "
-			       "new target(%u)\n",
+			CDEBUG(D_INFO, "IR: %s has already been connecting to new target(%u)\n",
 			       imp->imp_obd->obd_name, inst);
 		}
 	}
@@ -1333,7 +1334,7 @@ int lprocfs_rd_pinger_recov(struct seq_file *m, void *n)
 }
 EXPORT_SYMBOL(lprocfs_rd_pinger_recov);
 
-int lprocfs_wr_pinger_recov(struct file *file, const char *buffer,
+int lprocfs_wr_pinger_recov(struct file *file, const char __user *buffer,
 		      size_t count, loff_t *off)
 {
 	struct obd_device *obd = ((struct seq_file *)file->private_data)->private;

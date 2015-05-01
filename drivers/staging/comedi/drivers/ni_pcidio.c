@@ -384,11 +384,7 @@ static irqreturn_t nidio_interrupt(int irq, void *d)
 	struct comedi_subdevice *s = dev->read_subdev;
 	struct comedi_async *async = s->async;
 	struct mite_struct *mite = devpriv->mite;
-
-	/* int i, j; */
-	unsigned int auxdata = 0;
-	unsigned short data1 = 0;
-	unsigned short data2 = 0;
+	unsigned int auxdata;
 	int flags;
 	int status;
 	int work = 0;
@@ -422,7 +418,7 @@ static irqreturn_t nidio_interrupt(int irq, void *d)
 				 CHSR_DRQ1 | CHSR_MRDY)) {
 			dev_dbg(dev->class_dev,
 				"unknown mite interrupt, disabling IRQ\n");
-			async->events |= COMEDI_CB_EOA | COMEDI_CB_ERROR;
+			async->events |= COMEDI_CB_ERROR;
 			disable_irq(dev->irq);
 		}
 	}
@@ -451,13 +447,9 @@ static irqreturn_t nidio_interrupt(int irq, void *d)
 					goto out;
 				}
 				auxdata = readl(dev->mmio + Group_1_FIFO);
-				data1 = auxdata & 0xffff;
-				data2 = (auxdata & 0xffff0000) >> 16;
-				comedi_buf_put(s, data1);
-				comedi_buf_put(s, data2);
+				comedi_buf_write_samples(s, &auxdata, 1);
 				flags = readb(dev->mmio + Group_1_Flags);
 			}
-			async->events |= COMEDI_CB_BLOCK;
 		}
 
 		if (flags & CountExpired) {
@@ -468,7 +460,7 @@ static irqreturn_t nidio_interrupt(int irq, void *d)
 			break;
 		} else if (flags & Waited) {
 			writeb(ClearWaited, dev->mmio + Group_1_First_Clear);
-			async->events |= COMEDI_CB_EOA | COMEDI_CB_ERROR;
+			async->events |= COMEDI_CB_ERROR;
 			break;
 		} else if (flags & PrimaryTC) {
 			writeb(ClearPrimaryTC,
@@ -485,7 +477,7 @@ static irqreturn_t nidio_interrupt(int irq, void *d)
 	}
 
 out:
-	cfc_handle_events(dev, s);
+	comedi_handle_events(dev, s);
 #if 0
 	if (!tag)
 		writeb(0x03, dev->mmio + Master_DMA_And_Interrupt_Control);

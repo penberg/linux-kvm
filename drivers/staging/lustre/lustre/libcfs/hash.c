@@ -126,18 +126,21 @@ cfs_hash_nl_unlock(union cfs_hash_lock *lock, int exclusive) {}
 
 static inline void
 cfs_hash_spin_lock(union cfs_hash_lock *lock, int exclusive)
+	__acquires(&lock->spin)
 {
 	spin_lock(&lock->spin);
 }
 
 static inline void
 cfs_hash_spin_unlock(union cfs_hash_lock *lock, int exclusive)
+	__releases(&lock->spin)
 {
 	spin_unlock(&lock->spin);
 }
 
 static inline void
 cfs_hash_rw_lock(union cfs_hash_lock *lock, int exclusive)
+	__acquires(&lock->rw)
 {
 	if (!exclusive)
 		read_lock(&lock->rw);
@@ -147,6 +150,7 @@ cfs_hash_rw_lock(union cfs_hash_lock *lock, int exclusive)
 
 static inline void
 cfs_hash_rw_unlock(union cfs_hash_lock *lock, int exclusive)
+	__releases(&lock->rw)
 {
 	if (!exclusive)
 		read_unlock(&lock->rw);
@@ -1121,8 +1125,7 @@ cfs_hash_destroy(struct cfs_hash *hs)
 		cfs_hash_bd_for_each_hlist(hs, &bd, hhead) {
 			hlist_for_each_safe(hnode, pos, hhead) {
 				LASSERTF(!cfs_hash_with_assert_empty(hs),
-					 "hash %s bucket %u(%u) is not "
-					 " empty: %u items left\n",
+					 "hash %s bucket %u(%u) is not empty: %u items left\n",
 					 hs->hs_name, bd.bd_bucket->hsb_index,
 					 bd.bd_offset, bd.bd_bucket->hsb_count);
 				/* can't assert key valicate, because we
@@ -1371,8 +1374,7 @@ cfs_hash_lookup(struct cfs_hash *hs, const void *key)
 EXPORT_SYMBOL(cfs_hash_lookup);
 
 static void
-cfs_hash_for_each_enter(struct cfs_hash *hs)
-{
+cfs_hash_for_each_enter(struct cfs_hash *hs) {
 	LASSERT(!cfs_hash_is_exiting(hs));
 
 	if (!cfs_hash_with_rehash(hs))
@@ -1397,8 +1399,7 @@ cfs_hash_for_each_enter(struct cfs_hash *hs)
 }
 
 static void
-cfs_hash_for_each_exit(struct cfs_hash *hs)
-{
+cfs_hash_for_each_exit(struct cfs_hash *hs) {
 	int remained;
 	int bits;
 
@@ -1429,8 +1430,7 @@ cfs_hash_for_each_exit(struct cfs_hash *hs)
  */
 static __u64
 cfs_hash_for_each_tight(struct cfs_hash *hs, cfs_hash_for_each_cb_t func,
-			void *data, int remove_safe)
-{
+			void *data, int remove_safe) {
 	struct hlist_node     *hnode;
 	struct hlist_node     *pos;
 	struct cfs_hash_bd	 bd;
@@ -1523,8 +1523,7 @@ EXPORT_SYMBOL(cfs_hash_for_each);
 
 void
 cfs_hash_for_each_safe(struct cfs_hash *hs,
-		       cfs_hash_for_each_cb_t func, void *data)
-{
+		       cfs_hash_for_each_cb_t func, void *data) {
 	cfs_hash_for_each_tight(hs, func, data, 1);
 }
 EXPORT_SYMBOL(cfs_hash_for_each_safe);
@@ -1572,8 +1571,8 @@ EXPORT_SYMBOL(cfs_hash_size_get);
  * two cases, so iteration has to be stopped on change.
  */
 static int
-cfs_hash_for_each_relax(struct cfs_hash *hs, cfs_hash_for_each_cb_t func, void *data)
-{
+cfs_hash_for_each_relax(struct cfs_hash *hs, cfs_hash_for_each_cb_t func,
+			void *data) {
 	struct hlist_node *hnode;
 	struct hlist_node *tmp;
 	struct cfs_hash_bd     bd;
@@ -1585,7 +1584,7 @@ cfs_hash_for_each_relax(struct cfs_hash *hs, cfs_hash_for_each_cb_t func, void *
 
 	stop_on_change = cfs_hash_with_rehash_key(hs) ||
 			 !cfs_hash_with_no_itemref(hs) ||
-			 CFS_HOP(hs, put_locked) == NULL;
+			 hs->hs_ops->hs_put_locked == NULL;
 	cfs_hash_lock(hs, 0);
 	LASSERT(!cfs_hash_is_rehashing(hs));
 
@@ -1634,16 +1633,15 @@ cfs_hash_for_each_relax(struct cfs_hash *hs, cfs_hash_for_each_cb_t func, void *
 
 int
 cfs_hash_for_each_nolock(struct cfs_hash *hs,
-			 cfs_hash_for_each_cb_t func, void *data)
-{
+			 cfs_hash_for_each_cb_t func, void *data) {
 	if (cfs_hash_with_no_lock(hs) ||
 	    cfs_hash_with_rehash_key(hs) ||
 	    !cfs_hash_with_no_itemref(hs))
 		return -EOPNOTSUPP;
 
-	if (CFS_HOP(hs, get) == NULL ||
-	    (CFS_HOP(hs, put) == NULL &&
-	     CFS_HOP(hs, put_locked) == NULL))
+	if (hs->hs_ops->hs_get == NULL ||
+	    (hs->hs_ops->hs_put == NULL &&
+	     hs->hs_ops->hs_put_locked == NULL))
 		return -EOPNOTSUPP;
 
 	cfs_hash_for_each_enter(hs);
@@ -1667,16 +1665,15 @@ EXPORT_SYMBOL(cfs_hash_for_each_nolock);
  */
 int
 cfs_hash_for_each_empty(struct cfs_hash *hs,
-			cfs_hash_for_each_cb_t func, void *data)
-{
+			cfs_hash_for_each_cb_t func, void *data) {
 	unsigned  i = 0;
 
 	if (cfs_hash_with_no_lock(hs))
 		return -EOPNOTSUPP;
 
-	if (CFS_HOP(hs, get) == NULL ||
-	    (CFS_HOP(hs, put) == NULL &&
-	     CFS_HOP(hs, put_locked) == NULL))
+	if (hs->hs_ops->hs_get == NULL ||
+	    (hs->hs_ops->hs_put == NULL &&
+	     hs->hs_ops->hs_put_locked == NULL))
 		return -EOPNOTSUPP;
 
 	cfs_hash_for_each_enter(hs);
@@ -1726,8 +1723,7 @@ EXPORT_SYMBOL(cfs_hash_hlist_for_each);
    */
 void
 cfs_hash_for_each_key(struct cfs_hash *hs, const void *key,
-		      cfs_hash_for_each_cb_t func, void *data)
-{
+		      cfs_hash_for_each_cb_t func, void *data) {
 	struct hlist_node   *hnode;
 	struct cfs_hash_bd       bds[2];
 	unsigned	    i;

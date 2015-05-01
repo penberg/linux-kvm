@@ -247,7 +247,6 @@ struct flexcan_devtype_data {
 
 struct flexcan_priv {
 	struct can_priv can;
-	struct net_device *dev;
 	struct napi_struct napi;
 
 	void __iomem *base;
@@ -577,98 +576,30 @@ static int flexcan_poll_bus_err(struct net_device *dev, u32 reg_esr)
 	return 1;
 }
 
-static void do_state(struct net_device *dev,
-		     struct can_frame *cf, enum can_state new_state)
-{
-	struct flexcan_priv *priv = netdev_priv(dev);
-	struct can_berr_counter bec;
-
-	__flexcan_get_berr_counter(dev, &bec);
-
-	switch (priv->can.state) {
-	case CAN_STATE_ERROR_ACTIVE:
-		/*
-		 * from: ERROR_ACTIVE
-		 * to  : ERROR_WARNING, ERROR_PASSIVE, BUS_OFF
-		 * =>  : there was a warning int
-		 */
-		if (new_state >= CAN_STATE_ERROR_WARNING &&
-		    new_state <= CAN_STATE_BUS_OFF) {
-			netdev_dbg(dev, "Error Warning IRQ\n");
-			priv->can.can_stats.error_warning++;
-
-			cf->can_id |= CAN_ERR_CRTL;
-			cf->data[1] = (bec.txerr > bec.rxerr) ?
-				CAN_ERR_CRTL_TX_WARNING :
-				CAN_ERR_CRTL_RX_WARNING;
-		}
-	case CAN_STATE_ERROR_WARNING:	/* fallthrough */
-		/*
-		 * from: ERROR_ACTIVE, ERROR_WARNING
-		 * to  : ERROR_PASSIVE, BUS_OFF
-		 * =>  : error passive int
-		 */
-		if (new_state >= CAN_STATE_ERROR_PASSIVE &&
-		    new_state <= CAN_STATE_BUS_OFF) {
-			netdev_dbg(dev, "Error Passive IRQ\n");
-			priv->can.can_stats.error_passive++;
-
-			cf->can_id |= CAN_ERR_CRTL;
-			cf->data[1] = (bec.txerr > bec.rxerr) ?
-				CAN_ERR_CRTL_TX_PASSIVE :
-				CAN_ERR_CRTL_RX_PASSIVE;
-		}
-		break;
-	case CAN_STATE_BUS_OFF:
-		netdev_err(dev, "BUG! "
-			   "hardware recovered automatically from BUS_OFF\n");
-		break;
-	default:
-		break;
-	}
-
-	/* process state changes depending on the new state */
-	switch (new_state) {
-	case CAN_STATE_ERROR_WARNING:
-		netdev_dbg(dev, "Error Warning\n");
-		cf->can_id |= CAN_ERR_CRTL;
-		cf->data[1] = (bec.txerr > bec.rxerr) ?
-			CAN_ERR_CRTL_TX_WARNING :
-			CAN_ERR_CRTL_RX_WARNING;
-		break;
-	case CAN_STATE_ERROR_ACTIVE:
-		netdev_dbg(dev, "Error Active\n");
-		cf->can_id |= CAN_ERR_PROT;
-		cf->data[2] = CAN_ERR_PROT_ACTIVE;
-		break;
-	case CAN_STATE_BUS_OFF:
-		cf->can_id |= CAN_ERR_BUSOFF;
-		can_bus_off(dev);
-		break;
-	default:
-		break;
-	}
-}
-
 static int flexcan_poll_state(struct net_device *dev, u32 reg_esr)
 {
 	struct flexcan_priv *priv = netdev_priv(dev);
 	struct sk_buff *skb;
 	struct can_frame *cf;
-	enum can_state new_state;
+	enum can_state new_state = 0, rx_state = 0, tx_state = 0;
 	int flt;
+	struct can_berr_counter bec;
 
 	flt = reg_esr & FLEXCAN_ESR_FLT_CONF_MASK;
 	if (likely(flt == FLEXCAN_ESR_FLT_CONF_ACTIVE)) {
-		if (likely(!(reg_esr & (FLEXCAN_ESR_TX_WRN |
-					FLEXCAN_ESR_RX_WRN))))
-			new_state = CAN_STATE_ERROR_ACTIVE;
-		else
-			new_state = CAN_STATE_ERROR_WARNING;
-	} else if (unlikely(flt == FLEXCAN_ESR_FLT_CONF_PASSIVE))
+		tx_state = unlikely(reg_esr & FLEXCAN_ESR_TX_WRN) ?
+			   CAN_STATE_ERROR_WARNING : CAN_STATE_ERROR_ACTIVE;
+		rx_state = unlikely(reg_esr & FLEXCAN_ESR_RX_WRN) ?
+			   CAN_STATE_ERROR_WARNING : CAN_STATE_ERROR_ACTIVE;
+		new_state = max(tx_state, rx_state);
+	} else if (unlikely(flt == FLEXCAN_ESR_FLT_CONF_PASSIVE)) {
+		__flexcan_get_berr_counter(dev, &bec);
 		new_state = CAN_STATE_ERROR_PASSIVE;
-	else
+		rx_state = bec.rxerr >= bec.txerr ? new_state : 0;
+		tx_state = bec.rxerr <= bec.txerr ? new_state : 0;
+	} else {
 		new_state = CAN_STATE_BUS_OFF;
+	}
 
 	/* state hasn't changed */
 	if (likely(new_state == priv->can.state))
@@ -678,8 +609,11 @@ static int flexcan_poll_state(struct net_device *dev, u32 reg_esr)
 	if (unlikely(!skb))
 		return 0;
 
-	do_state(dev, cf, new_state);
-	priv->can.state = new_state;
+	can_change_state(dev, cf, tx_state, rx_state);
+
+	if (unlikely(new_state == CAN_STATE_BUS_OFF))
+		can_bus_off(dev);
+
 	netif_receive_skb(skb);
 
 	dev->stats.rx_packets++;
@@ -1285,7 +1219,6 @@ static int flexcan_probe(struct platform_device *pdev)
 		CAN_CTRLMODE_LISTENONLY	| CAN_CTRLMODE_3_SAMPLES |
 		CAN_CTRLMODE_BERR_REPORTING;
 	priv->base = base;
-	priv->dev = dev;
 	priv->clk_ipg = clk_ipg;
 	priv->clk_per = clk_per;
 	priv->pdata = dev_get_platdata(&pdev->dev);
@@ -1367,7 +1300,6 @@ static SIMPLE_DEV_PM_OPS(flexcan_pm_ops, flexcan_suspend, flexcan_resume);
 static struct platform_driver flexcan_driver = {
 	.driver = {
 		.name = DRV_NAME,
-		.owner = THIS_MODULE,
 		.pm = &flexcan_pm_ops,
 		.of_match_table = flexcan_of_match,
 	},

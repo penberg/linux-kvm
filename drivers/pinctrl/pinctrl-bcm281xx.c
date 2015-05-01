@@ -976,7 +976,7 @@ static inline void bcm281xx_pin_update(u32 *reg_val, u32 *reg_mask,
 	*reg_mask |= param_mask;
 }
 
-static struct regmap_config bcm281xx_pinctrl_regmap_config = {
+static const struct regmap_config bcm281xx_pinctrl_regmap_config = {
 	.reg_bits = 32,
 	.reg_stride = 4,
 	.val_bits = 32,
@@ -1404,11 +1404,6 @@ static int __init bcm281xx_pinctrl_probe(struct platform_device *pdev)
 
 	/* So far We can assume there is only 1 bank of registers */
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	if (!res) {
-		dev_err(&pdev->dev, "Missing MEM resource\n");
-		return -ENODEV;
-	}
-
 	pdata->reg_base = devm_ioremap_resource(&pdev->dev, res);
 	if (IS_ERR(pdata->reg_base)) {
 		dev_err(&pdev->dev, "Failed to ioremap MEM resource\n");
@@ -1440,7 +1435,7 @@ static int __init bcm281xx_pinctrl_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static struct of_device_id bcm281xx_pinctrl_of_match[] = {
+static const struct of_device_id bcm281xx_pinctrl_of_match[] = {
 	{ .compatible = "brcm,bcm11351-pinctrl", },
 	{ },
 };
@@ -1448,7 +1443,6 @@ static struct of_device_id bcm281xx_pinctrl_of_match[] = {
 static struct platform_driver bcm281xx_pinctrl_driver = {
 	.driver = {
 		.name = "bcm281xx-pinctrl",
-		.owner = THIS_MODULE,
 		.of_match_table = bcm281xx_pinctrl_of_match,
 	},
 };

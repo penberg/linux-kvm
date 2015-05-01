@@ -682,8 +682,7 @@ static int dcon_remove(struct i2c_client *client)
 
 	free_irq(DCON_IRQ, dcon);
 
-	if (dcon->bl_dev)
-		backlight_device_unregister(dcon->bl_dev);
+	backlight_device_unregister(dcon->bl_dev);
 
 	if (dcon_device != NULL)
 		platform_device_unregister(dcon_device);
@@ -781,7 +780,7 @@ static const struct i2c_device_id dcon_idtable[] = {
 };
 MODULE_DEVICE_TABLE(i2c, dcon_idtable);
 
-struct i2c_driver dcon_driver = {
+static struct i2c_driver dcon_driver = {
 	.driver = {
 		.name	= "olpc_dcon",
 		.pm = &dcon_pm_ops,

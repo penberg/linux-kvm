@@ -55,9 +55,9 @@ void tcp_time_wait(struct sock *sk, int state, int timeo);
 #define MAX_TCP_HEADER	(128 + MAX_HEADER)
 #define MAX_TCP_OPTION_SPACE 40
 
-/* 
+/*
  * Never offer a window over 32767 without using window scaling. Some
- * poor stacks do signed 16bit maths! 
+ * poor stacks do signed 16bit maths!
  */
 #define MAX_TCP_WINDOW		32767U
 
@@ -69,9 +69,6 @@ void tcp_time_wait(struct sock *sk, int state, int timeo);
 
 /* After receiving this amount of duplicate ACKs fast retransmit starts. */
 #define TCP_FASTRETRANS_THRESH 3
-
-/* Maximal reordering. */
-#define TCP_MAX_REORDERING	127
 
 /* Maximal number of ACKs sent quickly to accelerate slow-start. */
 #define TCP_MAX_QUICKACKS	16U
@@ -167,7 +164,7 @@ void tcp_time_wait(struct sock *sk, int state, int timeo);
 /*
  *	TCP option
  */
- 
+
 #define TCPOPT_NOP		1	/* Padding */
 #define TCPOPT_EOL		0	/* End of options */
 #define TCPOPT_MSS		2	/* Segment size negotiating */
@@ -252,6 +249,7 @@ extern int sysctl_tcp_abort_on_overflow;
 extern int sysctl_tcp_max_orphans;
 extern int sysctl_tcp_fack;
 extern int sysctl_tcp_reordering;
+extern int sysctl_tcp_max_reordering;
 extern int sysctl_tcp_dsack;
 extern long sysctl_tcp_mem[3];
 extern int sysctl_tcp_wmem[3];
@@ -264,8 +262,6 @@ extern int sysctl_tcp_low_latency;
 extern int sysctl_tcp_nometrics_save;
 extern int sysctl_tcp_moderate_rcvbuf;
 extern int sysctl_tcp_tso_win_divisor;
-extern int sysctl_tcp_mtu_probing;
-extern int sysctl_tcp_base_mss;
 extern int sysctl_tcp_workaround_signed_windows;
 extern int sysctl_tcp_slow_start_after_idle;
 extern int sysctl_tcp_thin_linear_timeouts;
@@ -276,6 +272,7 @@ extern int sysctl_tcp_challenge_ack_limit;
 extern unsigned int sysctl_tcp_notsent_lowat;
 extern int sysctl_tcp_min_tso_segs;
 extern int sysctl_tcp_autocorking;
+extern int sysctl_tcp_invalid_ratelimit;
 
 extern atomic_long_t tcp_memory_allocated;
 extern struct percpu_counter tcp_sockets_allocated;
@@ -450,6 +447,7 @@ int tcp_v4_conn_request(struct sock *sk, struct sk_buff *skb);
 struct sock *tcp_create_openreq_child(struct sock *sk,
 				      struct request_sock *req,
 				      struct sk_buff *skb);
+void tcp_ca_openreq_child(struct sock *sk, const struct dst_entry *dst);
 struct sock *tcp_v4_syn_recv_sock(struct sock *sk, struct sk_buff *skb,
 				  struct request_sock *req,
 				  struct dst_entry *dst);
@@ -492,17 +490,16 @@ u32 __cookie_v4_init_sequence(const struct iphdr *iph, const struct tcphdr *th,
 			      u16 *mssp);
 __u32 cookie_v4_init_sequence(struct sock *sk, const struct sk_buff *skb,
 			      __u16 *mss);
-#endif
-
 __u32 cookie_init_timestamp(struct request_sock *req);
-bool cookie_check_timestamp(struct tcp_options_received *opt, struct net *net,
-			    bool *ecn_ok);
+bool cookie_timestamp_decode(struct tcp_options_received *opt);
+bool cookie_ecn_ok(const struct tcp_options_received *opt,
+		   const struct net *net, const struct dst_entry *dst);
 
 /* From net/ipv6/syncookies.c */
 int __cookie_v6_check(const struct ipv6hdr *iph, const struct tcphdr *th,
 		      u32 cookie);
 struct sock *cookie_v6_check(struct sock *sk, struct sk_buff *skb);
-#ifdef CONFIG_SYN_COOKIES
+
 u32 __cookie_v6_init_sequence(const struct ipv6hdr *iph,
 			      const struct tcphdr *th, u16 *mssp);
 __u32 cookie_v6_init_sequence(struct sock *sk, const struct sk_buff *skb,
@@ -637,6 +634,11 @@ static inline u32 tcp_rto_min(struct sock *sk)
 static inline u32 tcp_rto_min_us(struct sock *sk)
 {
 	return jiffies_to_usecs(tcp_rto_min(sk));
+}
+
+static inline bool tcp_ca_dst_locked(const struct dst_entry *dst)
+{
+	return dst_metric_locked(dst, RTAX_CC_ALGO);
 }
 
 /* Compute the actual receive window we are currently advertising.
@@ -790,6 +792,8 @@ enum tcp_ca_ack_event_flags {
 #define TCP_CA_MAX	128
 #define TCP_CA_BUF_MAX	(TCP_CA_NAME_MAX*TCP_CA_MAX)
 
+#define TCP_CA_UNSPEC	0
+
 /* Algorithm can be set on socket without CAP_NET_ADMIN privileges */
 #define TCP_CONG_NON_RESTRICTED 0x1
 /* Requires ECN/ECT set on all packets */
@@ -797,7 +801,8 @@ enum tcp_ca_ack_event_flags {
 
 struct tcp_congestion_ops {
 	struct list_head	list;
-	unsigned long flags;
+	u32 key;
+	u32 flags;
 
 	/* initialize private data (optional) */
 	void (*init)(struct sock *sk);
@@ -837,12 +842,23 @@ void tcp_get_available_congestion_control(char *buf, size_t len);
 void tcp_get_allowed_congestion_control(char *buf, size_t len);
 int tcp_set_allowed_congestion_control(char *allowed);
 int tcp_set_congestion_control(struct sock *sk, const char *name);
-void tcp_slow_start(struct tcp_sock *tp, u32 acked);
-void tcp_cong_avoid_ai(struct tcp_sock *tp, u32 w);
+u32 tcp_slow_start(struct tcp_sock *tp, u32 acked);
+void tcp_cong_avoid_ai(struct tcp_sock *tp, u32 w, u32 acked);
 
 u32 tcp_reno_ssthresh(struct sock *sk);
 void tcp_reno_cong_avoid(struct sock *sk, u32 ack, u32 acked);
 extern struct tcp_congestion_ops tcp_reno;
+
+struct tcp_congestion_ops *tcp_ca_find_key(u32 key);
+u32 tcp_ca_get_key_by_name(const char *name);
+#ifdef CONFIG_INET
+char *tcp_ca_get_name_by_key(u32 key, char *buffer);
+#else
+static inline char *tcp_ca_get_name_by_key(u32 key, char *buffer)
+{
+	return NULL;
+}
+#endif
 
 static inline bool tcp_ca_needs_ecn(const struct sock *sk)
 {
@@ -1104,16 +1120,16 @@ static inline int tcp_win_from_space(int space)
 		space - (space>>sysctl_tcp_adv_win_scale);
 }
 
-/* Note: caller must be prepared to deal with negative returns */ 
+/* Note: caller must be prepared to deal with negative returns */
 static inline int tcp_space(const struct sock *sk)
 {
 	return tcp_win_from_space(sk->sk_rcvbuf -
 				  atomic_read(&sk->sk_rmem_alloc));
-} 
+}
 
 static inline int tcp_full_space(const struct sock *sk)
 {
-	return tcp_win_from_space(sk->sk_rcvbuf); 
+	return tcp_win_from_space(sk->sk_rcvbuf);
 }
 
 static inline void tcp_openreq_init(struct request_sock *req,
@@ -1127,6 +1143,7 @@ static inline void tcp_openreq_init(struct request_sock *req,
 	tcp_rsk(req)->rcv_isn = TCP_SKB_CB(skb)->seq;
 	tcp_rsk(req)->rcv_nxt = TCP_SKB_CB(skb)->seq + 1;
 	tcp_rsk(req)->snt_synack = tcp_time_stamp;
+	tcp_rsk(req)->last_oow_ack_time = 0;
 	req->mss = rx_opt->mss_clamp;
 	req->ts_recent = rx_opt->saw_tstamp ? rx_opt->rcv_tsval : 0;
 	ireq->tstamp_ok = rx_opt->tstamp_ok;
@@ -1217,6 +1234,37 @@ static inline bool tcp_paws_reject(const struct tcp_options_received *rx_opt,
 	if (rst && get_seconds() >= rx_opt->ts_recent_stamp + TCP_PAWS_MSL)
 		return false;
 	return true;
+}
+
+/* Return true if we're currently rate-limiting out-of-window ACKs and
+ * thus shouldn't send a dupack right now. We rate-limit dupacks in
+ * response to out-of-window SYNs or ACKs to mitigate ACK loops or DoS
+ * attacks that send repeated SYNs or ACKs for the same connection. To
+ * do this, we do not send a duplicate SYNACK or ACK if the remote
+ * endpoint is sending out-of-window SYNs or pure ACKs at a high rate.
+ */
+static inline bool tcp_oow_rate_limited(struct net *net,
+					const struct sk_buff *skb,
+					int mib_idx, u32 *last_oow_ack_time)
+{
+	/* Data packets without SYNs are not likely part of an ACK loop. */
+	if ((TCP_SKB_CB(skb)->seq != TCP_SKB_CB(skb)->end_seq) &&
+	    !tcp_hdr(skb)->syn)
+		goto not_rate_limited;
+
+	if (*last_oow_ack_time) {
+		s32 elapsed = (s32)(tcp_time_stamp - *last_oow_ack_time);
+
+		if (0 <= elapsed && elapsed < sysctl_tcp_invalid_ratelimit) {
+			NET_INC_STATS_BH(net, mib_idx);
+			return true;	/* rate-limited: don't send yet! */
+		}
+	}
+
+	*last_oow_ack_time = tcp_time_stamp;
+
+not_rate_limited:
+	return false;	/* not rate-limited: go ahead, send dupack now! */
 }
 
 static inline void tcp_mib_init(struct net *net)
@@ -1694,6 +1742,21 @@ static inline struct ip_options_rcu *tcp_v4_save_options(struct sk_buff *skb)
 		}
 	}
 	return dopt;
+}
+
+/* locally generated TCP pure ACKs have skb->truesize == 2
+ * (check tcp_send_ack() in net/ipv4/tcp_output.c )
+ * This is much faster than dissecting the packet to find out.
+ * (Think of GRE encapsulations, IPv4, IPv6, ...)
+ */
+static inline bool skb_is_tcp_pure_ack(const struct sk_buff *skb)
+{
+	return skb->truesize == 2;
+}
+
+static inline void skb_set_tcp_pure_ack(struct sk_buff *skb)
+{
+	skb->truesize = 2;
 }
 
 #endif	/* _TCP_H */

@@ -24,7 +24,7 @@
  * Description: Standard PC parallel port
  * Author: ds
  * Status: works in immediate mode
- * Devices: (standard) parallel port [comedi_parport]
+ * Devices: [standard] parallel port (comedi_parport)
  * Updated: Tue, 30 Apr 2002 21:11:45 -0700
  *
  * A cheap and easy way to get a few more digital I/O lines. Steal
@@ -225,10 +225,9 @@ static irqreturn_t parport_interrupt(int irq, void *d)
 	if (!(ctrl & PARPORT_CTRL_IRQ_ENA))
 		return IRQ_NONE;
 
-	comedi_buf_put(s, 0);
-	s->async->events |= COMEDI_CB_BLOCK | COMEDI_CB_EOS;
+	comedi_buf_write_samples(s, &s->state, 1);
+	comedi_handle_events(dev, s);
 
-	comedi_event(dev, s);
 	return IRQ_HANDLED;
 }
 

@@ -110,12 +110,8 @@ struct ipv6_txoptions *ipv6_update_options(struct sock *sk,
 			icsk->icsk_ext_hdr_len = opt->opt_flen + opt->opt_nflen;
 			icsk->icsk_sync_mss(sk, icsk->icsk_pmtu_cookie);
 		}
-		opt = xchg(&inet6_sk(sk)->opt, opt);
-	} else {
-		spin_lock(&sk->sk_dst_lock);
-		opt = xchg(&inet6_sk(sk)->opt, opt);
-		spin_unlock(&sk->sk_dst_lock);
 	}
+	opt = xchg(&inet6_sk(sk)->opt, opt);
 	sk_dst_reset(sk);
 
 	return opt;
@@ -1000,13 +996,9 @@ static int do_ipv6_getsockopt(struct sock *sk, int level, int optname,
 		lock_sock(sk);
 		skb = np->pktoptions;
 		if (skb)
-			atomic_inc(&skb->users);
-		release_sock(sk);
-
-		if (skb) {
 			ip6_datagram_recv_ctl(sk, &msg, skb);
-			kfree_skb(skb);
-		} else {
+		release_sock(sk);
+		if (!skb) {
 			if (np->rxopt.bits.rxinfo) {
 				struct in6_pktinfo src_info;
 				src_info.ipi6_ifindex = np->mcast_oif ? np->mcast_oif :

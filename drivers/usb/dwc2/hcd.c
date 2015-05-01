@@ -316,10 +316,12 @@ void dwc2_hcd_disconnect(struct dwc2_hsotg *hsotg)
  */
 static void dwc2_hcd_rem_wakeup(struct dwc2_hsotg *hsotg)
 {
-	if (hsotg->lx_state == DWC2_L2)
+	if (hsotg->lx_state == DWC2_L2) {
 		hsotg->flags.b.port_suspend_change = 1;
-	else
+		usb_hcd_resume_root_hub(hsotg->priv);
+	} else {
 		hsotg->flags.b.port_l1_change = 1;
+	}
 }
 
 /**
@@ -1371,6 +1373,8 @@ static void dwc2_conn_id_status_change(struct work_struct *work)
 		hsotg->op_state = OTG_STATE_B_PERIPHERAL;
 		dwc2_core_init(hsotg, false, -1);
 		dwc2_enable_global_interrupts(hsotg);
+		s3c_hsotg_core_init_disconnected(hsotg, false);
+		s3c_hsotg_core_connect(hsotg);
 	} else {
 		/* A-Device connector (Host Mode) */
 		dev_dbg(hsotg->dev, "connId A\n");
@@ -1606,7 +1610,9 @@ static int dwc2_hcd_hub_control(struct dwc2_hsotg *hsotg, u16 typereq,
 		hub_desc->bDescLength = 9;
 		hub_desc->bDescriptorType = 0x29;
 		hub_desc->bNbrPorts = 1;
-		hub_desc->wHubCharacteristics = cpu_to_le16(0x08);
+		hub_desc->wHubCharacteristics =
+			cpu_to_le16(HUB_CHAR_COMMON_LPSM |
+				    HUB_CHAR_INDV_PORT_OCPM);
 		hub_desc->bPwrOn2PwrGood = 1;
 		hub_desc->bHubContrCurrent = 0;
 		hub_desc->u.hs.DeviceRemovable[0] = 0;
@@ -2778,6 +2784,9 @@ int dwc2_hcd_init(struct dwc2_hsotg *hsotg, int irq,
 	int i, num_channels;
 	int retval;
 
+	if (usb_disabled())
+		return -ENODEV;
+
 	dev_dbg(hsotg->dev, "DWC OTG HCD INIT\n");
 
 	/* Detect config values from hardware */
@@ -2839,7 +2848,6 @@ int dwc2_hcd_init(struct dwc2_hsotg *hsotg, int irq,
 
 	hcd->has_tt = 1;
 
-	spin_lock_init(&hsotg->lock);
 	((struct wrapper_priv_data *) &hcd->hcd_priv)->hsotg = hsotg;
 	hsotg->priv = hcd;
 

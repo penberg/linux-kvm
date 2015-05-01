@@ -71,6 +71,8 @@ struct event_constraint {
 #define PERF_X86_EVENT_COMMITTED	0x8 /* event passed commit_txn */
 #define PERF_X86_EVENT_PEBS_LD_HSW	0x10 /* haswell style datala, load */
 #define PERF_X86_EVENT_PEBS_NA_HSW	0x20 /* haswell style datala, unknown */
+#define PERF_X86_EVENT_RDPMC_ALLOWED	0x40 /* grant rdpmc permission */
+
 
 struct amd_nb {
 	int nb_id;  /* NorthBridge id */
@@ -252,6 +254,10 @@ struct cpu_hw_events {
  */
 #define INTEL_UEVENT_CONSTRAINT(c, n)	\
 	EVENT_CONSTRAINT(c, n, INTEL_ARCH_EVENT_MASK)
+
+/* Like UEVENT_CONSTRAINT, but match flags too */
+#define INTEL_FLAGS_UEVENT_CONSTRAINT(c, n)	\
+	EVENT_CONSTRAINT(c, n, INTEL_ARCH_EVENT_MASK|X86_ALL_EVENT_FLAGS)
 
 #define INTEL_PLD_CONSTRAINT(c, n)	\
 	__EVENT_CONSTRAINT(c, n, INTEL_ARCH_EVENT_MASK|X86_ALL_EVENT_FLAGS, \

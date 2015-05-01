@@ -2054,7 +2054,7 @@ bnad_init_rx_config(struct bnad *bnad, struct bna_rx_config *rx_config)
 				 BFI_ENET_RSS_IPV4_TCP);
 		rx_config->rss_config.hash_mask =
 				bnad->num_rxp_per_rx - 1;
-		get_random_bytes(rx_config->rss_config.toeplitz_hash_key,
+		netdev_rss_key_fill(rx_config->rss_config.toeplitz_hash_key,
 			sizeof(rx_config->rss_config.toeplitz_hash_key));
 	} else {
 		rx_config->rss_status = BNA_STATUS_T_DISABLED;
@@ -2824,8 +2824,8 @@ bnad_txq_wi_prepare(struct bnad *bnad, struct bna_tcb *tcb,
 	u32 gso_size;
 	u16 vlan_tag = 0;
 
-	if (vlan_tx_tag_present(skb)) {
-		vlan_tag = (u16)vlan_tx_tag_get(skb);
+	if (skb_vlan_tag_present(skb)) {
+		vlan_tag = (u16)skb_vlan_tag_get(skb);
 		flags |= (BNA_TXQ_WI_CF_INS_PRIO | BNA_TXQ_WI_CF_INS_VLAN);
 	}
 	if (test_bit(BNAD_RF_CEE_RUNNING, &bnad->run_flags)) {

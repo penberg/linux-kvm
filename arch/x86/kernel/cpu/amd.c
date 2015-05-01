@@ -566,6 +566,17 @@ static void init_amd_k8(struct cpuinfo_x86 *c)
 
 	if (!c->x86_model_id[0])
 		strcpy(c->x86_model_id, "Hammer");
+
+#ifdef CONFIG_SMP
+	/*
+	 * Disable TLB flush filter by setting HWCR.FFDIS on K8
+	 * bit 6 of msr C001_0015
+	 *
+	 * Errata 63 for SH-B3 steppings
+	 * Errata 122 for all steppings (F+ have it disabled by default)
+	 */
+	msr_set_bit(MSR_K7_HWCR, 6);
+#endif
 }
 
 static void init_amd_gh(struct cpuinfo_x86 *c)
@@ -635,18 +646,6 @@ static void init_amd_bd(struct cpuinfo_x86 *c)
 static void init_amd(struct cpuinfo_x86 *c)
 {
 	u32 dummy;
-
-#ifdef CONFIG_SMP
-	/*
-	 * Disable TLB flush filter by setting HWCR.FFDIS on K8
-	 * bit 6 of msr C001_0015
-	 *
-	 * Errata 63 for SH-B3 steppings
-	 * Errata 122 for all steppings (F+ have it disabled by default)
-	 */
-	if (c->x86 == 0xf)
-		msr_set_bit(MSR_K7_HWCR, 6);
-#endif
 
 	early_init_amd(c);
 
@@ -869,4 +868,23 @@ static bool cpu_has_amd_erratum(struct cpuinfo_x86 *cpu, const int *erratum)
 			return true;
 
 	return false;
+}
+
+void set_dr_addr_mask(unsigned long mask, int dr)
+{
+	if (!cpu_has_bpext)
+		return;
+
+	switch (dr) {
+	case 0:
+		wrmsr(MSR_F16H_DR0_ADDR_MASK, mask, 0);
+		break;
+	case 1:
+	case 2:
+	case 3:
+		wrmsr(MSR_F16H_DR1_ADDR_MASK - 1 + dr, mask, 0);
+		break;
+	default:
+		break;
+	}
 }

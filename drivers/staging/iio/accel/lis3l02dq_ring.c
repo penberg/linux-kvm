@@ -35,6 +35,7 @@ irqreturn_t lis3l02dq_data_rdy_trig_poll(int irq, void *private)
 		iio_trigger_poll(st->trig);
 		return IRQ_HANDLED;
 	}
+
 	return IRQ_WAKE_THREAD;
 }
 
@@ -392,7 +393,7 @@ int lis3l02dq_configure_buffer(struct iio_dev *indio_dev)
 	int ret;
 	struct iio_buffer *buffer;
 
-	buffer = iio_kfifo_allocate(indio_dev);
+	buffer = iio_kfifo_allocate();
 	if (!buffer)
 		return -ENOMEM;
 

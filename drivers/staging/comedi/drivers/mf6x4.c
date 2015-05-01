@@ -18,7 +18,7 @@
 /*
  * Driver: mf6x4
  * Description: Humusoft MF634 and MF624 Data acquisition card driver
- * Devices: Humusoft MF634, Humusoft MF624
+ * Devices: [Humusoft] MF634 (mf634), MF624 (mf624)
  * Author: Rostislav Lisovy <lisovy@gmail.com>
  * Status: works
  * Updated:
@@ -259,7 +259,6 @@ static int mf6x4_auto_attach(struct comedi_device *dev, unsigned long context)
 	s->maxdata = 0x3fff; /* 14 bits DAC */
 	s->range_table = &range_bipolar10;
 	s->insn_write = mf6x4_ao_insn_write;
-	s->insn_read = comedi_readback_insn_read;
 
 	ret = comedi_alloc_subdev_readback(s);
 	if (ret)

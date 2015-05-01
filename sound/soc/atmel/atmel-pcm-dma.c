@@ -80,9 +80,7 @@ static void atmel_pcm_dma_irq(u32 ssc_sr,
 
 		/* stop RX and capture: will be enabled again at restart */
 		ssc_writex(prtd->ssc->regs, SSC_CR, prtd->mask->ssc_disable);
-		snd_pcm_stream_lock(substream);
-		snd_pcm_stop(substream, SNDRV_PCM_STATE_XRUN);
-		snd_pcm_stream_unlock(substream);
+		snd_pcm_stop_xrun(substream);
 
 		/* now drain RHR and read status to remove xrun condition */
 		ssc_readx(prtd->ssc->regs, SSC_RHR);
@@ -107,13 +105,11 @@ static int atmel_pcm_configure_dma(struct snd_pcm_substream *substream,
 		return ret;
 	}
 
-	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
-		slave_config->dst_addr = ssc->phybase + SSC_THR;
-		slave_config->dst_maxburst = 1;
-	} else {
-		slave_config->src_addr = ssc->phybase + SSC_RHR;
-		slave_config->src_maxburst = 1;
-	}
+	slave_config->dst_addr = ssc->phybase + SSC_THR;
+	slave_config->dst_maxburst = 1;
+
+	slave_config->src_addr = ssc->phybase + SSC_RHR;
+	slave_config->src_maxburst = 1;
 
 	prtd->dma_intr_handler = atmel_pcm_dma_irq;
 

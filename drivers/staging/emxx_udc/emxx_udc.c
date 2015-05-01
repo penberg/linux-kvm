@@ -1608,7 +1608,7 @@ static int std_req_get_status(struct nbu2ss_udc *udc)
 	switch (recipient) {
 	case USB_RECIP_DEVICE:
 		if (udc->ctrl.wIndex == 0x0000) {
-			if (udc->self_powered)
+			if (udc->gadget.is_selfpowered)
 				status_data |= (1 << USB_DEVICE_SELF_POWERED);
 
 			if (udc->remote_wakeup)
@@ -2622,7 +2622,7 @@ static int nbu2ss_ep_enable(
 		return -EINVAL;
 	}
 
-	ep_type = desc->bmAttributes & USB_ENDPOINT_XFERTYPE_MASK;
+	ep_type = usb_endpoint_type(desc);
 	if ((ep_type == USB_ENDPOINT_XFER_CONTROL)
 		|| (ep_type == USB_ENDPOINT_XFER_ISOC)) {
 
@@ -2644,7 +2644,7 @@ static int nbu2ss_ep_enable(
 	spin_lock_irqsave(&udc->lock, flags);
 
 	ep->desc = desc;
-	ep->epnum = desc->bEndpointAddress & USB_ENDPOINT_NUMBER_MASK;
+	ep->epnum = usb_endpoint_num(desc);
 	ep->direct = desc->bEndpointAddress & USB_ENDPOINT_DIR_MASK;
 	ep->ep_type = ep_type;
 	ep->wedged = 0;
@@ -2722,8 +2722,7 @@ static void nbu2ss_ep_free_request(
 	if (_req != NULL) {
 		req = container_of(_req, struct nbu2ss_req, req);
 
-		if (req != NULL)
-			kfree(req);
+		kfree(req);
 	}
 }
 
@@ -3118,7 +3117,7 @@ static int nbu2ss_gad_wakeup(struct usb_gadget *pgadget)
 static int nbu2ss_gad_set_selfpowered(struct usb_gadget *pgadget,
 					int is_selfpowered)
 {
-	struct nbu2ss_udc	*udc;
+	struct nbu2ss_udc       *udc;
 	unsigned long		flags;
 
 /*	INFO("=== %s()\n", __func__); */
@@ -3131,7 +3130,7 @@ static int nbu2ss_gad_set_selfpowered(struct usb_gadget *pgadget,
 	udc = container_of(pgadget, struct nbu2ss_udc, gadget);
 
 	spin_lock_irqsave(&udc->lock, flags);
-	udc->self_powered = (is_selfpowered != 0);
+	pgadget->is_selfpowered = (is_selfpowered != 0);
 	spin_unlock_irqrestore(&udc->lock, flags);
 
 	return 0;
@@ -3250,42 +3249,6 @@ static const char *gp_ep_name[NUM_ENDPOINTS] = {
 };
 
 /*-------------------------------------------------------------------------*/
-static void __init nbu2ss_drv_set_ep_info(
-	struct nbu2ss_udc	*udc,
-	struct nbu2ss_ep	*ep,
-	const char *name)
-{
-	ep->udc = udc;
-	ep->desc = NULL;
-
-	ep->ep.driver_data = NULL;
-	ep->ep.name = name;
-	ep->ep.ops = &nbu2ss_ep_ops;
-
-	if (isdigit(name[2])) {
-
-		long	num;
-		int	res;
-		char	tempbuf[2];
-
-		tempbuf[0] = name[2];
-		tempbuf[1] = '\0';
-		res = kstrtol(tempbuf, 16, &num);
-
-		if (num == 0)
-			ep->ep.maxpacket = EP0_PACKETSIZE;
-		else
-			ep->ep.maxpacket = EP_PACKETSIZE;
-
-	} else {
-		ep->ep.maxpacket = EP_PACKETSIZE;
-	}
-
-	list_add_tail(&ep->ep.ep_list, &udc->gadget.ep_list);
-	INIT_LIST_HEAD(&ep->queue);
-}
-
-/*-------------------------------------------------------------------------*/
 static void __init nbu2ss_drv_ep_init(struct nbu2ss_udc *udc)
 {
 	int	i;
@@ -3293,9 +3256,21 @@ static void __init nbu2ss_drv_ep_init(struct nbu2ss_udc *udc)
 	INIT_LIST_HEAD(&udc->gadget.ep_list);
 	udc->gadget.ep0 = &udc->ep[0].ep;
 
+	for (i = 0; i < NUM_ENDPOINTS; i++) {
+		struct nbu2ss_ep *ep = &udc->ep[i];
 
-	for (i = 0; i < NUM_ENDPOINTS; i++)
-		nbu2ss_drv_set_ep_info(udc, &udc->ep[i], gp_ep_name[i]);
+		ep->udc = udc;
+		ep->desc = NULL;
+
+		ep->ep.driver_data = NULL;
+		ep->ep.name = gp_ep_name[i];
+		ep->ep.ops = &nbu2ss_ep_ops;
+
+		ep->ep.maxpacket = (i == 0 ? EP0_PACKETSIZE : EP_PACKETSIZE);
+
+		list_add_tail(&ep->ep.ep_list, &udc->gadget.ep_list);
+		INIT_LIST_HEAD(&ep->queue);
+	}
 
 	list_del_init(&udc->ep[0].ep.ep_list);
 }
@@ -3309,7 +3284,7 @@ static int __init nbu2ss_drv_contest_init(
 	spin_lock_init(&udc->lock);
 	udc->dev = &pdev->dev;
 
-	udc->self_powered = 1;
+	udc->gadget.is_selfpowered = 1;
 	udc->devstate = USB_STATE_NOTATTACHED;
 	udc->pdev = pdev;
 	udc->mA = 0;
@@ -3491,7 +3466,6 @@ static struct platform_driver udc_driver = {
 	.suspend	= nbu2ss_drv_suspend,
 	.resume		= nbu2ss_drv_resume,
 	.driver		= {
-		.owner	= THIS_MODULE,
 		.name	= driver_name,
 	},
 };

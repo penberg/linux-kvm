@@ -44,6 +44,10 @@ const char *ftrace_print_bitmask_seq(struct trace_seq *p, void *bitmask_ptr,
 const char *ftrace_print_hex_seq(struct trace_seq *p,
 				 const unsigned char *buf, int len);
 
+const char *ftrace_print_array_seq(struct trace_seq *p,
+				   const void *buf, int buf_len,
+				   size_t el_size);
+
 struct trace_iterator;
 struct trace_event;
 
@@ -137,6 +141,17 @@ enum print_line_t {
 	TRACE_TYPE_UNHANDLED	= 2,	/* Relay to other output functions */
 	TRACE_TYPE_NO_CONSUME	= 3	/* Handled but ask to not consume */
 };
+
+/*
+ * Several functions return TRACE_TYPE_PARTIAL_LINE if the trace_seq
+ * overflowed, and TRACE_TYPE_HANDLED otherwise. This helper function
+ * simplifies those functions and keeps them in sync.
+ */
+static inline enum print_line_t trace_handle_return(struct trace_seq *s)
+{
+	return trace_seq_has_overflowed(s) ?
+		TRACE_TYPE_PARTIAL_LINE : TRACE_TYPE_HANDLED;
+}
 
 void tracing_generic_entry_update(struct trace_entry *entry,
 				  unsigned long flags,
@@ -584,7 +599,7 @@ extern int  ftrace_profile_set_filter(struct perf_event *event, int event_id,
 				     char *filter_str);
 extern void ftrace_profile_free_filter(struct perf_event *event);
 extern void *perf_trace_buf_prepare(int size, unsigned short type,
-				    struct pt_regs *regs, int *rctxp);
+				    struct pt_regs **regs, int *rctxp);
 
 static inline void
 perf_trace_buf_submit(void *raw_data, int size, int rctx, u64 addr,

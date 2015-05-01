@@ -55,6 +55,17 @@
 #define SDMMC_BUFADDR		0x098
 #define SDMMC_CDTHRCTL		0x100
 #define SDMMC_DATA(x)		(x)
+/*
+* Registers to support idmac 64-bit address mode
+*/
+#define SDMMC_DBADDRL		0x088
+#define SDMMC_DBADDRU		0x08c
+#define SDMMC_IDSTS64		0x090
+#define SDMMC_IDINTEN64		0x094
+#define SDMMC_DSCADDRL		0x098
+#define SDMMC_DSCADDRU		0x09c
+#define SDMMC_BUFADDRL		0x0A0
+#define SDMMC_BUFADDRU		0x0A4
 
 /*
  * Data offset is difference according to Version
@@ -214,7 +225,7 @@ extern int dw_mci_resume(struct dw_mci *host);
  *	with CONFIG_MMC_CLKGATE.
  * @flags: Random state bits associated with the slot.
  * @id: Number of this slot.
- * @last_detect_state: Most recently observed card detect state.
+ * @sdio_id: Number of this slot in the SDIO interrupt registers.
  */
 struct dw_mci_slot {
 	struct mmc_host		*mmc;
@@ -233,13 +244,9 @@ struct dw_mci_slot {
 	unsigned long		flags;
 #define DW_MMC_CARD_PRESENT	0
 #define DW_MMC_CARD_NEED_INIT	1
+#define DW_MMC_CARD_NO_LOW_PWR	2
 	int			id;
-	int			last_detect_state;
-};
-
-struct dw_mci_tuning_data {
-	const u8 *blk_pattern;
-	unsigned int blksz;
+	int			sdio_id;
 };
 
 /**
@@ -263,7 +270,6 @@ struct dw_mci_drv_data {
 	void		(*prepare_command)(struct dw_mci *host, u32 *cmdr);
 	void		(*set_ios)(struct dw_mci *host, struct mmc_ios *ios);
 	int		(*parse_dt)(struct dw_mci *host);
-	int		(*execute_tuning)(struct dw_mci_slot *slot, u32 opcode,
-					struct dw_mci_tuning_data *tuning_data);
+	int		(*execute_tuning)(struct dw_mci_slot *slot);
 };
 #endif /* _DW_MMC_H_ */

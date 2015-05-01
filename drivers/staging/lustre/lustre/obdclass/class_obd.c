@@ -61,7 +61,7 @@ __u64 obd_alloc;
 EXPORT_SYMBOL(obd_alloc);
 __u64 obd_pages;
 EXPORT_SYMBOL(obd_pages);
-DEFINE_SPINLOCK(obd_updatemax_lock);
+static DEFINE_SPINLOCK(obd_updatemax_lock);
 
 /* The following are visible and mutable through /proc/sys/lustre/. */
 unsigned int obd_alloc_fail_rate = 0;
@@ -144,13 +144,11 @@ int obd_alloc_fail(const void *ptr, const char *name, const char *type,
 		CERROR("%s%salloc of %s (%llu bytes) failed at %s:%d\n",
 		       ptr ? "force " :"", type, name, (__u64)size, file,
 		       line);
-		CERROR("%llu total bytes and %llu total pages "
-		       "(%llu bytes) allocated by Lustre, "
-		       "%d total bytes by LNET\n",
+		CERROR("%llu total bytes and %llu total pages (%llu bytes) allocated by Lustre, %d total bytes by LNET\n",
 		       obd_memory_sum(),
 		       obd_pages_sum() << PAGE_CACHE_SHIFT,
 		       obd_pages_sum(),
-			atomic_read(&libcfs_kmemory));
+		       atomic_read(&libcfs_kmemory));
 		return 1;
 	}
 	return 0;

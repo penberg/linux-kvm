@@ -78,7 +78,7 @@ static const char * __init dmi_string(const struct dmi_header *dm, u8 s)
  *	We have to be cautious here. We have seen BIOSes with DMI pointers
  *	pointing to completely the wrong place for example
  */
-static void dmi_table(u8 *buf, int len, int num,
+static void dmi_table(u8 *buf, u32 len, int num,
 		      void (*decode)(const struct dmi_header *, void *),
 		      void *private_data)
 {
@@ -102,13 +102,20 @@ static void dmi_table(u8 *buf, int len, int num,
 			data++;
 		if (data - buf < len - 1)
 			decode(dm, private_data);
+
+		/*
+		 * 7.45 End-of-Table (Type 127) [SMBIOS reference spec v3.0.0]
+		 */
+		if (dm->type == DMI_ENTRY_END_OF_TABLE)
+			break;
+
 		data += 2;
 		i++;
 	}
 }
 
-static u32 dmi_base;
-static u16 dmi_len;
+static phys_addr_t dmi_base;
+static u32 dmi_len;
 static u16 dmi_num;
 
 static int __init dmi_walk_early(void (*decode)(const struct dmi_header *,
@@ -467,7 +474,7 @@ static int __init dmi_present(const u8 *buf)
 
 	if (memcmp(buf, "_SM_", 4) == 0 &&
 	    buf[5] < 32 && dmi_checksum(buf, buf[5])) {
-		smbios_ver = (buf[6] << 8) + buf[7];
+		smbios_ver = get_unaligned_be16(buf + 6);
 
 		/* Some BIOS report weird SMBIOS version, fix that up */
 		switch (smbios_ver) {
@@ -489,10 +496,9 @@ static int __init dmi_present(const u8 *buf)
 	buf += 16;
 
 	if (memcmp(buf, "_DMI_", 5) == 0 && dmi_checksum(buf, 15)) {
-		dmi_num = (buf[13] << 8) | buf[12];
-		dmi_len = (buf[7] << 8) | buf[6];
-		dmi_base = (buf[11] << 24) | (buf[10] << 16) |
-			(buf[9] << 8) | buf[8];
+		dmi_num = get_unaligned_le16(buf + 12);
+		dmi_len = get_unaligned_le16(buf + 6);
+		dmi_base = get_unaligned_le32(buf + 8);
 
 		if (dmi_walk_early(dmi_decode) == 0) {
 			if (smbios_ver) {
@@ -514,12 +520,72 @@ static int __init dmi_present(const u8 *buf)
 	return 1;
 }
 
+/*
+ * Check for the SMBIOS 3.0 64-bit entry point signature. Unlike the legacy
+ * 32-bit entry point, there is no embedded DMI header (_DMI_) in here.
+ */
+static int __init dmi_smbios3_present(const u8 *buf)
+{
+	if (memcmp(buf, "_SM3_", 5) == 0 &&
+	    buf[6] < 32 && dmi_checksum(buf, buf[6])) {
+		dmi_ver = get_unaligned_be16(buf + 7);
+		dmi_len = get_unaligned_le32(buf + 12);
+		dmi_base = get_unaligned_le64(buf + 16);
+
+		/*
+		 * The 64-bit SMBIOS 3.0 entry point no longer has a field
+		 * containing the number of structures present in the table.
+		 * Instead, it defines the table size as a maximum size, and
+		 * relies on the end-of-table structure type (#127) to be used
+		 * to signal the end of the table.
+		 * So let's define dmi_num as an upper bound as well: each
+		 * structure has a 4 byte header, so dmi_len / 4 is an upper
+		 * bound for the number of structures in the table.
+		 */
+		dmi_num = dmi_len / 4;
+
+		if (dmi_walk_early(dmi_decode) == 0) {
+			pr_info("SMBIOS %d.%d present.\n",
+				dmi_ver >> 8, dmi_ver & 0xFF);
+			dmi_format_ids(dmi_ids_string, sizeof(dmi_ids_string));
+			pr_debug("DMI: %s\n", dmi_ids_string);
+			return 0;
+		}
+	}
+	return 1;
+}
+
 void __init dmi_scan_machine(void)
 {
 	char __iomem *p, *q;
 	char buf[32];
 
 	if (efi_enabled(EFI_CONFIG_TABLES)) {
+		/*
+		 * According to the DMTF SMBIOS reference spec v3.0.0, it is
+		 * allowed to define both the 64-bit entry point (smbios3) and
+		 * the 32-bit entry point (smbios), in which case they should
+		 * either both point to the same SMBIOS structure table, or the
+		 * table pointed to by the 64-bit entry point should contain a
+		 * superset of the table contents pointed to by the 32-bit entry
+		 * point (section 5.2)
+		 * This implies that the 64-bit entry point should have
+		 * precedence if it is defined and supported by the OS. If we
+		 * have the 64-bit entry point, but fail to decode it, fall
+		 * back to the legacy one (if available)
+		 */
+		if (efi.smbios3 != EFI_INVALID_TABLE_ADDR) {
+			p = dmi_early_remap(efi.smbios3, 32);
+			if (p == NULL)
+				goto error;
+			memcpy_fromio(buf, p, 32);
+			dmi_early_unmap(p, 32);
+
+			if (!dmi_smbios3_present(buf)) {
+				dmi_available = 1;
+				goto out;
+			}
+		}
 		if (efi.smbios == EFI_INVALID_TABLE_ADDR)
 			goto error;
 
@@ -552,7 +618,7 @@ void __init dmi_scan_machine(void)
 		memset(buf, 0, 16);
 		for (q = p; q < p + 0x10000; q += 16) {
 			memcpy_fromio(buf + 16, q, 16);
-			if (!dmi_present(buf)) {
+			if (!dmi_smbios3_present(buf) || !dmi_present(buf)) {
 				dmi_available = 1;
 				dmi_early_unmap(p, 0x10000);
 				goto out;

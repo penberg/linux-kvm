@@ -45,6 +45,7 @@
 #include "../include/lprocfs_status.h"
 #include "../include/lustre/lustre_idl.h"
 #include <linux/seq_file.h>
+#include <linux/ctype.h>
 
 static const char * const obd_connect_names[] = {
 	"read_only",
@@ -177,7 +178,7 @@ int lprocfs_read_frac_helper(char *buffer, unsigned long count, long val,
 }
 EXPORT_SYMBOL(lprocfs_read_frac_helper);
 
-int lprocfs_write_frac_helper(const char *buffer, unsigned long count,
+int lprocfs_write_frac_helper(const char __user *buffer, unsigned long count,
 			      int *val, int mult)
 {
 	char kernbuf[20], *end, *pbuf;
@@ -1400,8 +1401,8 @@ int lprocfs_alloc_obd_stats(struct obd_device *obd, unsigned num_private_stats)
 		 * LPROCFS_OBD_OP_INIT(.., .., opname)
 		 * is missing from the list above. */
 		LASSERTF(stats->ls_cnt_header[i].lc_name != NULL,
-			 "Missing obd_stat initializer obd_op "
-			 "operation at offset %d.\n", i - num_private_stats);
+			 "Missing obd_stat initializer obd_op operation at offset %d.\n",
+			 i - num_private_stats);
 	}
 	rc = lprocfs_register_stats(obd->obd_proc_entry, "stats", stats);
 	if (rc < 0) {
@@ -1486,8 +1487,7 @@ int lprocfs_alloc_md_stats(struct obd_device *obd,
 
 	for (i = num_private_stats; i < num_stats; i++) {
 		if (stats->ls_cnt_header[i].lc_name == NULL) {
-			CERROR("Missing md_stat initializer md_op "
-			       "operation at offset %d. Aborting.\n",
+			CERROR("Missing md_stat initializer md_op operation at offset %d. Aborting.\n",
 			       i - num_private_stats);
 			LBUG();
 		}
@@ -1607,8 +1607,7 @@ LPROC_SEQ_FOPS_RO(lproc_exp_hash);
 int lprocfs_nid_stats_clear_read(struct seq_file *m, void *data)
 {
 	return seq_printf(m, "%s\n",
-			"Write into this file to clear all nid stats and "
-			"stale nid entries");
+			  "Write into this file to clear all nid stats and stale nid entries");
 }
 EXPORT_SYMBOL(lprocfs_nid_stats_clear_read);
 
@@ -1819,7 +1818,7 @@ __s64 lprocfs_read_helper(struct lprocfs_counter *lc,
 }
 EXPORT_SYMBOL(lprocfs_read_helper);
 
-int lprocfs_write_helper(const char *buffer, unsigned long count,
+int lprocfs_write_helper(const char __user *buffer, unsigned long count,
 			 int *val)
 {
 	return lprocfs_write_frac_helper(buffer, count, val, 1);
@@ -1851,7 +1850,7 @@ int lprocfs_seq_read_frac_helper(struct seq_file *m, long val, int mult)
 }
 EXPORT_SYMBOL(lprocfs_seq_read_frac_helper);
 
-int lprocfs_write_u64_helper(const char *buffer, unsigned long count,
+int lprocfs_write_u64_helper(const char __user *buffer, unsigned long count,
 			     __u64 *val)
 {
 	return lprocfs_write_frac_u64_helper(buffer, count, val, 1);
@@ -1864,6 +1863,7 @@ int lprocfs_write_frac_u64_helper(const char *buffer, unsigned long count,
 	char kernbuf[22], *end, *pbuf;
 	__u64 whole, frac = 0, units;
 	unsigned frac_d = 1;
+	int sign = 1;
 
 	if (count > (sizeof(kernbuf) - 1))
 		return -EINVAL;
@@ -1874,7 +1874,7 @@ int lprocfs_write_frac_u64_helper(const char *buffer, unsigned long count,
 	kernbuf[count] = '\0';
 	pbuf = kernbuf;
 	if (*pbuf == '-') {
-		mult = -mult;
+		sign = -1;
 		pbuf++;
 	}
 
@@ -1882,7 +1882,7 @@ int lprocfs_write_frac_u64_helper(const char *buffer, unsigned long count,
 	if (pbuf == end)
 		return -EINVAL;
 
-	if (end != NULL && *end == '.') {
+	if (*end == '.') {
 		int i;
 		pbuf = end + 1;
 
@@ -1897,25 +1897,25 @@ int lprocfs_write_frac_u64_helper(const char *buffer, unsigned long count,
 	}
 
 	units = 1;
-	switch (*end) {
-	case 'p': case 'P':
+	switch (tolower(*end)) {
+	case 'p':
 		units <<= 10;
-	case 't': case 'T':
+	case 't':
 		units <<= 10;
-	case 'g': case 'G':
+	case 'g':
 		units <<= 10;
-	case 'm': case 'M':
+	case 'm':
 		units <<= 10;
-	case 'k': case 'K':
+	case 'k':
 		units <<= 10;
 	}
 	/* Specified units override the multiplier */
-	if (units)
-		mult = mult < 0 ? -units : units;
+	if (units > 1)
+		mult = units;
 
 	frac *= mult;
 	do_div(frac, frac_d);
-	*val = whole * mult + frac;
+	*val = sign * (whole * mult + frac);
 	return 0;
 }
 EXPORT_SYMBOL(lprocfs_write_frac_u64_helper);

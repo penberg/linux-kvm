@@ -994,7 +994,7 @@ static irqreturn_t omap_aes_irq(int irq, void *dev_id)
 
 			scatterwalk_advance(&dd->in_walk, 4);
 			if (dd->in_sg->length == _calc_walked(in)) {
-				dd->in_sg = scatterwalk_sg_next(dd->in_sg);
+				dd->in_sg = sg_next(dd->in_sg);
 				if (dd->in_sg) {
 					scatterwalk_start(&dd->in_walk,
 							  dd->in_sg);
@@ -1026,7 +1026,7 @@ static irqreturn_t omap_aes_irq(int irq, void *dev_id)
 			*dst = omap_aes_read(dd, AES_REG_DATA_N(dd, i));
 			scatterwalk_advance(&dd->out_walk, 4);
 			if (dd->out_sg->length == _calc_walked(out)) {
-				dd->out_sg = scatterwalk_sg_next(dd->out_sg);
+				dd->out_sg = sg_next(dd->out_sg);
 				if (dd->out_sg) {
 					scatterwalk_start(&dd->out_walk,
 							  dd->out_sg);
@@ -1314,7 +1314,6 @@ static struct platform_driver omap_aes_driver = {
 	.remove	= omap_aes_remove,
 	.driver	= {
 		.name	= "omap-aes",
-		.owner	= THIS_MODULE,
 		.pm	= &omap_aes_pm_ops,
 		.of_match_table	= omap_aes_of_match,
 	},

@@ -333,6 +333,52 @@ out_putf:
 }
 #endif
 
+ssize_t vfs_iter_read(struct file *file, struct iov_iter *iter, loff_t *ppos)
+{
+	struct kiocb kiocb;
+	ssize_t ret;
+
+	if (!file->f_op->read_iter)
+		return -EINVAL;
+
+	init_sync_kiocb(&kiocb, file);
+	kiocb.ki_pos = *ppos;
+	kiocb.ki_nbytes = iov_iter_count(iter);
+
+	iter->type |= READ;
+	ret = file->f_op->read_iter(&kiocb, iter);
+	if (ret == -EIOCBQUEUED)
+		ret = wait_on_sync_kiocb(&kiocb);
+
+	if (ret > 0)
+		*ppos = kiocb.ki_pos;
+	return ret;
+}
+EXPORT_SYMBOL(vfs_iter_read);
+
+ssize_t vfs_iter_write(struct file *file, struct iov_iter *iter, loff_t *ppos)
+{
+	struct kiocb kiocb;
+	ssize_t ret;
+
+	if (!file->f_op->write_iter)
+		return -EINVAL;
+
+	init_sync_kiocb(&kiocb, file);
+	kiocb.ki_pos = *ppos;
+	kiocb.ki_nbytes = iov_iter_count(iter);
+
+	iter->type |= WRITE;
+	ret = file->f_op->write_iter(&kiocb, iter);
+	if (ret == -EIOCBQUEUED)
+		ret = wait_on_sync_kiocb(&kiocb);
+
+	if (ret > 0)
+		*ppos = kiocb.ki_pos;
+	return ret;
+}
+EXPORT_SYMBOL(vfs_iter_write);
+
 /*
  * rw_verify_area doesn't like huge counts. We limit
  * them to something that fits in "int" so that others
@@ -358,7 +404,7 @@ int rw_verify_area(int read_write, struct file *file, const loff_t *ppos, size_t
 			return retval;
 	}
 
-	if (unlikely(inode->i_flock && mandatory_lock(inode))) {
+	if (unlikely(inode->i_flctx && mandatory_lock(inode))) {
 		retval = locks_mandatory_area(
 			read_write == READ ? FLOCK_VERIFY_READ : FLOCK_VERIFY_WRITE,
 			inode, file, pos, count);
@@ -412,6 +458,23 @@ ssize_t new_sync_read(struct file *filp, char __user *buf, size_t len, loff_t *p
 
 EXPORT_SYMBOL(new_sync_read);
 
+ssize_t __vfs_read(struct file *file, char __user *buf, size_t count,
+		   loff_t *pos)
+{
+	ssize_t ret;
+
+	if (file->f_op->read)
+		ret = file->f_op->read(file, buf, count, pos);
+	else if (file->f_op->aio_read)
+		ret = do_sync_read(file, buf, count, pos);
+	else if (file->f_op->read_iter)
+		ret = new_sync_read(file, buf, count, pos);
+	else
+		ret = -EINVAL;
+
+	return ret;
+}
+
 ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 {
 	ssize_t ret;
@@ -426,12 +489,7 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 	ret = rw_verify_area(READ, file, pos, count);
 	if (ret >= 0) {
 		count = ret;
-		if (file->f_op->read)
-			ret = file->f_op->read(file, buf, count, pos);
-		else if (file->f_op->aio_read)
-			ret = do_sync_read(file, buf, count, pos);
-		else
-			ret = new_sync_read(file, buf, count, pos);
+		ret = __vfs_read(file, buf, count, pos);
 		if (ret > 0) {
 			fsnotify_access(file);
 			add_rchar(current, ret);

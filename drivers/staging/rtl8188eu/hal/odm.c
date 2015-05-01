@@ -437,8 +437,8 @@ void odm_CommonInfoSelfInit(struct odm_dm_struct *pDM_Odm)
 {
 	struct adapter *adapter = pDM_Odm->Adapter;
 
-	pDM_Odm->bCckHighPower = (bool) phy_query_bb_reg(adapter, 0x824, BIT9);
-	pDM_Odm->RFPathRxEnable = (u8) phy_query_bb_reg(adapter, 0xc04, 0x0F);
+	pDM_Odm->bCckHighPower = (bool)phy_query_bb_reg(adapter, 0x824, BIT9);
+	pDM_Odm->RFPathRxEnable = (u8)phy_query_bb_reg(adapter, 0xc04, 0x0F);
 
 	ODM_InitDebugSetting(pDM_Odm);
 }
@@ -529,18 +529,13 @@ void odm_DIGInit(struct odm_dm_struct *pDM_Odm)
 	struct adapter *adapter = pDM_Odm->Adapter;
 	struct rtw_dig *pDM_DigTable = &pDM_Odm->DM_DigTable;
 
-	pDM_DigTable->CurIGValue = (u8) phy_query_bb_reg(adapter, ODM_REG_IGI_A_11N, ODM_BIT_IGI_11N);
+	pDM_DigTable->CurIGValue = (u8)phy_query_bb_reg(adapter, ODM_REG_IGI_A_11N, ODM_BIT_IGI_11N);
 	pDM_DigTable->RssiLowThresh	= DM_DIG_THRESH_LOW;
 	pDM_DigTable->RssiHighThresh	= DM_DIG_THRESH_HIGH;
 	pDM_DigTable->FALowThresh	= DM_false_ALARM_THRESH_LOW;
 	pDM_DigTable->FAHighThresh	= DM_false_ALARM_THRESH_HIGH;
-	if (pDM_Odm->BoardType == ODM_BOARD_HIGHPWR) {
-		pDM_DigTable->rx_gain_range_max = DM_DIG_MAX_NIC;
-		pDM_DigTable->rx_gain_range_min = DM_DIG_MIN_NIC;
-	} else {
-		pDM_DigTable->rx_gain_range_max = DM_DIG_MAX_NIC;
-		pDM_DigTable->rx_gain_range_min = DM_DIG_MIN_NIC;
-	}
+	pDM_DigTable->rx_gain_range_max = DM_DIG_MAX_NIC;
+	pDM_DigTable->rx_gain_range_min = DM_DIG_MIN_NIC;
 	pDM_DigTable->BackoffVal = DM_DIG_BACKOFF_DEFAULT;
 	pDM_DigTable->BackoffVal_range_max = DM_DIG_BACKOFF_MAX;
 	pDM_DigTable->BackoffVal_range_min = DM_DIG_BACKOFF_MIN;
@@ -620,7 +615,7 @@ void odm_DIG(struct odm_dm_struct *pDM_Odm)
 		} else if (pDM_Odm->SupportAbility & ODM_BB_ANT_DIV) {
 			/* 1 Lower Bound for 88E AntDiv */
 			if (pDM_Odm->AntDivType == CG_TRX_HW_ANTDIV) {
-				DIG_Dynamic_MIN = (u8) pDM_DigTable->AntDiv_RSSI_max;
+				DIG_Dynamic_MIN = (u8)pDM_DigTable->AntDiv_RSSI_max;
 				ODM_RT_TRACE(pDM_Odm, ODM_COMP_ANT_DIV, ODM_DBG_LOUD,
 					     ("odm_DIG(): pDM_DigTable->AntDiv_RSSI_max=%d\n",
 					     pDM_DigTable->AntDiv_RSSI_max));
@@ -1138,16 +1133,9 @@ static void FindMinimumRSSI(struct adapter *pAdapter)
 {
 	struct hal_data_8188e	*pHalData = GET_HAL_DATA(pAdapter);
 	struct dm_priv	*pdmpriv = &pHalData->dmpriv;
-	struct mlme_priv	*pmlmepriv = &pAdapter->mlmepriv;
 
-	/* 1 1.Determine the minimum RSSI */
-	if ((check_fwstate(pmlmepriv, _FW_LINKED) == false) &&
-	    (pdmpriv->EntryMinUndecoratedSmoothedPWDB == 0))
-		pdmpriv->MinUndecoratedPWDBForDM = 0;
-	if (check_fwstate(pmlmepriv, _FW_LINKED) == true)	/*  Default port */
-		pdmpriv->MinUndecoratedPWDBForDM = pdmpriv->EntryMinUndecoratedSmoothedPWDB;
-	else /*  associated entry pwdb */
-		pdmpriv->MinUndecoratedPWDBForDM = pdmpriv->EntryMinUndecoratedSmoothedPWDB;
+	/* 1 1.Unconditionally set RSSI */
+	pdmpriv->MinUndecoratedPWDBForDM = pdmpriv->EntryMinUndecoratedSmoothedPWDB;
 }
 
 void odm_RSSIMonitorCheckCE(struct odm_dm_struct *pDM_Odm)

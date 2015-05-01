@@ -61,7 +61,7 @@ unsigned long thread_saved_pc(struct task_struct *tsk)
 	return sf->gprs[8];
 }
 
-extern void __kprobes kernel_thread_starter(void);
+extern void kernel_thread_starter(void);
 
 /*
  * Free current thread data structures etc..
@@ -78,6 +78,14 @@ void flush_thread(void)
 void release_thread(struct task_struct *dead_task)
 {
 }
+
+#ifdef CONFIG_64BIT
+void arch_release_task_struct(struct task_struct *tsk)
+{
+	if (tsk->thread.vxrs)
+		kfree(tsk->thread.vxrs);
+}
+#endif
 
 int copy_thread(unsigned long clone_flags, unsigned long new_stackp,
 		unsigned long arg, struct task_struct *p)
@@ -153,6 +161,7 @@ int copy_thread(unsigned long clone_flags, unsigned long new_stackp,
 	save_fp_ctl(&p->thread.fp_regs.fpc);
 	save_fp_regs(p->thread.fp_regs.fprs);
 	p->thread.fp_regs.pad = 0;
+	p->thread.vxrs = NULL;
 	/* Set a new TLS ?  */
 	if (clone_flags & CLONE_SETTLS) {
 		unsigned long tls = frame->childregs.gprs[6];
@@ -241,14 +250,4 @@ unsigned long arch_randomize_brk(struct mm_struct *mm)
 
 	ret = PAGE_ALIGN(mm->brk + brk_rnd());
 	return (ret > mm->brk) ? ret : mm->brk;
-}
-
-unsigned long randomize_et_dyn(unsigned long base)
-{
-	unsigned long ret;
-
-	if (!(current->flags & PF_RANDOMIZE))
-		return base;
-	ret = PAGE_ALIGN(base + brk_rnd());
-	return (ret > base) ? ret : base;
 }
