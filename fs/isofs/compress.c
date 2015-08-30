@@ -66,8 +66,8 @@ static loff_t zisofs_uncompress_block(struct inode *inode, loff_t block_start,
 		return 0;
 	}
 	/* Empty block? */
-	if (block_size == 0) {
-		for ( i = 0 ; i < pcount ; i++ ) {
+	if (!block_size) {
+		for ( i = 0 ; i < pcount ; ++i ) {
 			if (!pages[i])
 				continue;
 			memset(page_address(pages[i]), 0, PAGE_CACHE_SIZE);
@@ -175,10 +175,10 @@ static loff_t zisofs_uncompress_block(struct inode *inode, loff_t block_start,
 				flush_dcache_page(pages[curpage]);
 				SetPageUptodate(pages[curpage]);
 			}
-			curpage++;
+			++curpage;
 		}
 		if (!stream.avail_in)
-			curbh++;
+			++curbh;
 	}
 inflate_out:
 	zlib_inflateEnd(&stream);
@@ -187,7 +187,7 @@ z_eio:
 	mutex_unlock(&zisofs_zlib_lock);
 
 b_eio:
-	for (i = 0; i < haveblocks; i++)
+	for (i = 0; i < haveblocks; ++i)
 		brelse(bhs[i]);
 	return stream.total_out;
 }
@@ -277,7 +277,7 @@ static int zisofs_fill_pages(struct inode *inode, int full_page, int pcount,
 		}
 
 		block_start = block_end;
-		cstart_block++;
+		++cstart_block;
 	}
 
 	if (poffset && *pages) {
@@ -331,7 +331,7 @@ static int zisofs_readpage(struct file *file, struct page *page)
 	}
 	pages[full_page] = page;
 
-	for (i = 0; i < pcount; i++, index++) {
+	for (i = 0; i < pcount; ++i, ++index) {
 		if (i != full_page)
 			pages[i] = grab_cache_page_nowait(mapping, index);
 		if (pages[i]) {
@@ -343,7 +343,7 @@ static int zisofs_readpage(struct file *file, struct page *page)
 	err = zisofs_fill_pages(inode, full_page, pcount, pages);
 
 	/* Release any residual pages, do not SetPageUptodate */
-	for (i = 0; i < pcount; i++) {
+	for (i = 0; i < pcount; ++i) {
 		if (pages[i]) {
 			flush_dcache_page(pages[i]);
 			if (i == full_page && err)
