@@ -3,6 +3,9 @@
  * to doing mounts and running stage 2 of the init process.
  */
 #include <sys/mount.h>
+#include <sys/reboot.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
 #include <string.h>
 #include <unistd.h>
 #include <stdio.h>
